@@ -23,6 +23,7 @@ and per-category feature toggles.
 | Capability | Gap | Route |
 | --- | --- | --- |
 | Multiple sites | Config knows exactly one site | Endpoint registry (below) |
+| Getting configured at all | No help discovering the right values; misconfig shows up as raw 401s/HTML errors | Setup diagnostics (below): probe a URL, derive the rest of the endpoint config, explain failures with the fix |
 | Popular plugin data (WooCommerce, ACF, Yoast, …) | No access to plugin REST namespaces | `wc/v3` and friends work with the same application-password Basic auth; add first-class WooCommerce tools plus a gated generic REST passthrough for everything else |
 | Diagnostics | No health tooling | `wp-site-health/v1` REST namespace (verified working): loopback, background-updates, https-status, dotorg-communication, authorization-header tests, and `directory-sizes` |
 | Client page workflows | Multi-step flows (upload cover + set featured image + publish) need many calls | Convenience tools: `wp_set_featured_image` (upload/attach/set in one), `wp_clone_post`, `wp_replace_in_post` |
@@ -129,6 +130,77 @@ Rules:
 Startup banner and `/healthz` report the endpoint count and each endpoint's channel
 status (`rest: yes/no`, `management: Ssh/Local/Docker/none`).
 
+## Setup diagnostics
+
+Getting the first endpoint configured is where users hit the sharpest edges. Three were
+hit during v0.1 development alone: a fresh install serves HTML from `/wp-json/` because
+permalinks are plain; application passwords are silently rejected over plain HTTP unless
+`WP_ENVIRONMENT_TYPE=local` is set; and a `BaseUrl` that doesn't match `siteurl` gets
+redirected and fails confusingly. These tools turn each of those into an explained
+finding with the fix.
+
+**Design rules:**
+
+- Setup tools work with **no configuration at all** — they take their inputs as
+  parameters, so they can be used before an endpoint exists. They never require the
+  server to be write-enabled (they only read), so they work in the default read-only
+  posture.
+- Every finding is structured: `{ check, status: ok|warn|fail, detail, fix }` where
+  `fix` names the exact config key or WordPress change needed.
+- They **emit config**: the outcome includes a ready-to-paste `Endpoints` block with
+  every value the probe could determine.
+- Credentials are never echoed back — passwords are reported as present/absent only.
+
+**Tools:**
+
+1. `wp_setup_probe(url, username?, applicationPassword?)` — the main onboarding tool.
+   Works with a URL alone; credentials optional and deepen the checks. Reports:
+   - **Reachability**: DNS resolution, TCP connect, HTTP status, redirect chain and
+     final URL (a `http→https` or `example.com→www.example.com` redirect means the
+     `BaseUrl` should be the *final* URL — reported as the recommended value).
+   - **TLS**: whether HTTPS is available, certificate subject/SAN names, issuer, expiry
+     and days remaining, whether the hostname matches the certificate, and whether the
+     chain validates. Flags a self-signed/mismatched certificate together with the
+     `AllowInvalidCertificate` key and warns that it should only be used for homelab
+     sites. If the site answers on HTTPS but the supplied URL was HTTP, recommends
+     switching (application passwords require HTTPS).
+   - **WordPress identity**: confirms it is WordPress, reports `name`, `description`,
+     `url`/`home` (flagging a mismatch with the probed URL, which breaks REST calls),
+     WordPress version if discoverable, and the site's timezone.
+   - **REST API**: which addressing works — pretty `/wp-json/` vs
+     `?rest_route=` — reported as the permalink state, plus available namespaces
+     (so `wc/v3` presence tells the user WooCommerce tools will work). Detects the
+     common blockers: REST disabled by a security plugin, a 403 from a WAF, HTML
+     returned instead of JSON.
+   - **Authentication** (when credentials are given): whether the application password
+     is accepted, the resolved user, their roles, and whether they hold the
+     capabilities the tool groups need (`manage_options`, `edit_posts`, `upload_files`,
+     `activate_plugins`, `list_users`) — so a user gets told *which tool groups*
+     their account can drive rather than discovering it tool by tool. Distinguishes
+     "password rejected" from "Authorization header stripped by the host" (a common
+     Apache/CGI issue) by consulting the site-health authorization-header test, and
+     from the plain-HTTP rejection case, naming `WP_ENVIRONMENT_TYPE=local` as the
+     dev-site fix.
+   - **Suggested config**: the `Endpoints` block to paste, with the recommended
+     `BaseUrl` (final redirect target), username, a password placeholder, and
+     `AllowInvalidCertificate` only if the TLS check requires it.
+2. `wp_setup_instructions(url?)` — no probing; returns the step-by-step for creating an
+   application password (wp-admin path and the WP-CLI one-liner), what role is needed,
+   and the minimal `Endpoints` block skeleton. Useful when the site isn't reachable
+   from the server yet.
+3. `wp_test_endpoint(site)` — validates an **already-configured** endpoint end to end:
+   REST reachability + auth + capabilities, and (when a management block exists) SSH/
+   Docker/local connectivity, `wp` availability and version, the resolved path being a
+   real WordPress install, and the `siteurl` identity cross-check. This is the
+   "why isn't my endpoint working" tool and the natural post-configuration smoke test.
+4. `wp_setup_probe_ssh(host, port?, username?, privateKeyPath?, password?, path?)`
+   (lands with Phase 3, the management channel) — connectivity, whether `wp` is on the
+   PATH and its version, whether `path` contains a WordPress install, that install's
+   `siteurl`/`home`, and — where the SSH user can see them — **other WordPress installs
+   under common web roots**, each with its `siteurl`, so a multi-site host can be
+   registered correctly rather than by guessing paths. Returns a suggested `Ssh` block
+   per discovered install.
+
 ## Plan
 
 ### Phase 1 — Endpoint registry + channel independence (restructure)
@@ -145,8 +217,13 @@ onto the flat config.
    registry and inherit the selection/error rules above.
 3. `wp_list_endpoints`, updated startup banner and `/healthz`.
 4. Per-endpoint safety overrides (stricter-wins).
-5. Update README, `WordpressMCPSharp.json` sample, and Docker env examples to the
-   `Endpoints` shape.
+5. **Setup diagnostics** — `wp_setup_probe`, `wp_setup_instructions`,
+   `wp_test_endpoint` (REST halves; the management half of `wp_test_endpoint` and
+   `wp_setup_probe_ssh` land with Phase 3). These ship in Phase 1 because a new user's
+   first problem is configuration, not tools.
+6. Update README, `WordpressMCPSharp.json` sample, and Docker env examples to the
+   `Endpoints` shape, with a "Getting started: run `wp_setup_probe` against your site
+   URL" walkthrough as the first section.
 
 ### Phase 2 — REST coverage
 
@@ -199,6 +276,8 @@ Global gates: `Management:AllowCliManagement` (master, default false) and
 4. **Escape hatch** — `wp_cli` (raw WP-CLI command, argument array), double-gated by
    `AllowArbitraryCli` + write mode, with a deny-list (`eval`, `eval-file`, `shell`)
    in the RouterOS style.
+5. **Management-side setup diagnostics** — `wp_setup_probe_ssh` (including discovery of
+   other WordPress installs on the host) and the management half of `wp_test_endpoint`.
 
 ### Phase 4 — Snapshots, backup, restore
 
@@ -251,6 +330,17 @@ REST phases and the Docker management mode. Add WooCommerce to the test site for
 `wc/v3` tools, and cover: snapshot → mutate site → restore → verify content reverted;
 core update path on a pinned older wordpress image; provisioning a second fresh site
 from nothing via the Docker mode.
+
+Setup-diagnostic cases, all reproducible on the WSL rig: probe with no credentials;
+probe with a wrong password; probe the plain-HTTP site *without*
+`WP_ENVIRONMENT_TYPE=local` and confirm the finding names that fix; probe before
+setting pretty permalinks and confirm the `?rest_route=` state is reported; probe a
+URL that redirects (add an nginx/Apache redirect or use the container IP) and confirm
+the recommended `BaseUrl` is the final URL; probe a self-signed HTTPS vhost and confirm
+the certificate findings plus the `AllowInvalidCertificate` guidance; probe a non-WordPress
+URL and confirm a clean "not WordPress" result rather than an exception; and
+`wp_test_endpoint` against a deliberately broken endpoint (bad password, wrong path)
+in both channels.
 
 Endpoint/channel cases: two endpoints where one is REST-only and one is CLI-only,
 confirming each side's tools work and the other side's tools return the
