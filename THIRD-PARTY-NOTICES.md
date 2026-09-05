@@ -18,6 +18,7 @@ license; this file is provided for attribution.
 | Serilog.Settings.Configuration | Apache-2.0 |
 | Serilog.Sinks.Console | Apache-2.0 |
 | Serilog.Sinks.File | Apache-2.0 |
+| SSH.NET | MIT |
 
 The full text of the MIT and Apache-2.0 licenses is available at
 <https://opensource.org/license/mit> and

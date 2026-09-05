@@ -47,7 +47,11 @@ ENV DOTNET_ENVIRONMENT=Production \
     WORDPRESSMCP_Wordpress__ReadOnly=true \
     WORDPRESSMCP_Wordpress__AllowDelete=false \
     WORDPRESSMCP_Wordpress__AllowPluginInstall=false \
-    WORDPRESSMCP_Wordpress__AllowRestPassthrough=false
+    WORDPRESSMCP_Wordpress__AllowRestPassthrough=false \
+    WORDPRESSMCP_Management__AllowCliManagement=false \
+    WORDPRESSMCP_Management__AllowArbitraryCli=false \
+    WORDPRESSMCP_Management__AllowProvisioning=false \
+    WORDPRESSMCP_Snapshots__AllowRestore=false
 
 # Configure sites at run time, for example:
 #   -e WORDPRESSMCP_Endpoints__site1__RestApi__BaseUrl=https://example.com/ \

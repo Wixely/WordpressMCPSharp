@@ -26,12 +26,35 @@
       "ReadOnly": true
     }
   },
+  "//Endpoints-example-management-only": {
+    "clientsite": {
+      "Docker": { "Container": "wordpress", "Path": "/var/www/html" },
+      "Url": "https://clientsite.example.com/"
+    }
+  },
   "Endpoints": {},
+  "Management": {
+    "AllowCliManagement": false,
+    "AllowArbitraryCli": false,
+    "AllowProvisioning": false,
+    "CommandTimeoutSeconds": 300,
+    "LongCommandTimeoutSeconds": 1800,
+    "SkipIdentityCheck": false,
+    "DeniedCliCommands": [ "eval", "eval-file", "shell", "server" ]
+  },
+  "Snapshots": {
+    "Directory": "",
+    "MaxSnapshots": 10,
+    "IncludeUploads": true,
+    "AllowRestore": false
+  },
   "Wordpress": {
     "ReadOnly": true,
     "AllowDelete": false,
     "AllowPluginInstall": false,
     "AllowRestPassthrough": false,
+    "EnableWooCommerce": true,
+    "EnableSiteHealth": true,
     "EnableContent": true,
     "EnableComments": true,
     "EnableUsers": true,

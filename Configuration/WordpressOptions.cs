@@ -107,6 +107,54 @@ public sealed class WordpressOptions
     }
 }
 
+/// <summary>Global settings for the WP-CLI management channel.</summary>
+public sealed class ManagementOptions
+{
+    public const string SectionName = "Management";
+
+    /// <summary>Master gate for every WP-CLI-backed tool. Default false — management is opt-in.</summary>
+    public bool AllowCliManagement { get; set; }
+
+    /// <summary>Second gate for the raw wp_cli escape hatch. Requires AllowCliManagement as well.</summary>
+    public bool AllowArbitraryCli { get; set; }
+
+    /// <summary>Second gate for provisioning a brand new WordPress install (wp_provision_site).</summary>
+    public bool AllowProvisioning { get; set; }
+
+    /// <summary>Timeout for a single WP-CLI invocation, in seconds.</summary>
+    public int CommandTimeoutSeconds { get; set; } = 300;
+
+    /// <summary>Timeout for long operations such as core updates, backups and restores, in seconds.</summary>
+    public int LongCommandTimeoutSeconds { get; set; } = 1800;
+
+    /// <summary>
+    /// Skip the siteurl identity cross-check before mutating operations. Leave false: the check is what
+    /// stops a stale path from writing to the wrong site on a host running several installs.
+    /// </summary>
+    public bool SkipIdentityCheck { get; set; }
+
+    /// <summary>WP-CLI subcommands that the raw wp_cli tool always refuses, even when AllowArbitraryCli is true.</summary>
+    public List<string> DeniedCliCommands { get; set; } = new() { "eval", "eval-file", "shell", "server" };
+}
+
+/// <summary>Snapshot/backup settings.</summary>
+public sealed class SnapshotOptions
+{
+    public const string SectionName = "Snapshots";
+
+    /// <summary>Directory on this server where snapshots are stored, one subdirectory per endpoint.</summary>
+    public string Directory { get; set; } = string.Empty;
+
+    /// <summary>Keep at most this many snapshots per endpoint; the oldest are pruned after a successful capture. 0 disables pruning.</summary>
+    public int MaxSnapshots { get; set; } = 10;
+
+    /// <summary>Include wp-content/uploads in file archives. Turning this off makes snapshots much smaller but excludes media.</summary>
+    public bool IncludeUploads { get; set; } = true;
+
+    /// <summary>Gate for restoring a snapshot over a live site. Default false — restoring overwrites content.</summary>
+    public bool AllowRestore { get; set; }
+}
+
 /// <summary>Top-level site registry, bound from the configuration root.</summary>
 public sealed class RegistryOptions
 {

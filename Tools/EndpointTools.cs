@@ -58,6 +58,7 @@ public static class EndpointTools
     public static async Task<string> TestEndpoint(
         EndpointRegistry registry,
         SetupDiagnosticsService setup,
+        ManagementService management,
         [Description("Endpoint name from wp_list_endpoints. Omit to use DefaultSite (or the only configured endpoint).")] string? site = null,
         CancellationToken ct = default)
     {
@@ -114,32 +115,44 @@ public static class EndpointTools
             };
         }
 
-        var management = endpoint.HasManagement
-            ? new
-            {
-                configured = true,
-                mode = endpoint.ManagementMode,
-                path = EndpointRegistry.ManagementPath(endpoint),
-                tested = false,
-                detail = "Connectivity testing for the WP-CLI management channel arrives with the management tools; the configuration is present and valid.",
-            }
-            : new
+        object managementResult;
+        var managementWorking = false;
+
+        if (!endpoint.HasManagement)
+        {
+            managementResult = new
             {
                 configured = false,
+                enabled = management.Options.AllowCliManagement,
                 mode = "none",
-                path = (string?)null,
-                tested = false,
                 detail = $"Endpoint '{name}' has no management block, so WP-CLI tools (core/plugin updates, backups, provisioning) are unavailable on it. " +
                          $"Configure exactly one of Endpoints:{name}:Ssh, :Local or :Docker to enable them.",
             };
-
-        var summary = (endpoint.HasRest, restWorking, endpoint.HasManagement) switch
+        }
+        else if (!management.Options.AllowCliManagement)
         {
-            (true, true, true) => $"Endpoint '{name}' is working: REST authenticated, management channel configured ({endpoint.ManagementMode}).",
-            (true, true, false) => $"Endpoint '{name}' is working over REST. No management channel, so WP-CLI tools (updates, backups, provisioning) are unavailable on it.",
-            (true, false, _) => $"Endpoint '{name}' has REST configured but it is not usable — see the failing findings below.",
-            (false, _, true) => $"Endpoint '{name}' is management-only ({endpoint.ManagementMode}); REST tools are unavailable on it.",
-            _ => $"Endpoint '{name}' has no usable channel configured.",
+            managementResult = new
+            {
+                configured = true,
+                enabled = false,
+                mode = endpoint.ManagementMode,
+                detail = "The management channel is configured but disabled. Set Management:AllowCliManagement=true to enable the WP-CLI tools.",
+            };
+            problems.Add("Management: channel configured but Management:AllowCliManagement=false.");
+        }
+        else
+        {
+            (managementResult, managementWorking) = await TestManagementAsync(management, name, problems, ct);
+        }
+
+        var summary = (endpoint.HasRest && restWorking, endpoint.HasManagement && managementWorking) switch
+        {
+            (true, true) => $"Endpoint '{name}' is fully working: REST authenticated and WP-CLI reachable ({endpoint.ManagementMode}).",
+            (true, false) when endpoint.HasManagement => $"Endpoint '{name}' works over REST, but its management channel has a problem — see below.",
+            (true, false) => $"Endpoint '{name}' is working over REST. No management channel, so WP-CLI tools (updates, backups, provisioning) are unavailable on it.",
+            (false, true) when endpoint.HasRest => $"Endpoint '{name}' has a working management channel, but its REST configuration is not usable — see the failing findings.",
+            (false, true) => $"Endpoint '{name}' is management-only ({endpoint.ManagementMode}) and WP-CLI is reachable; REST tools are unavailable on it.",
+            _ => $"Endpoint '{name}' is not usable — see the problems listed below.",
         };
 
         return JsonSerializer.Serialize(new
@@ -155,9 +168,85 @@ public static class EndpointTools
                 allowPluginInstall = safety.AllowPluginInstall,
             },
             rest,
-            management,
+            management = managementResult,
             warnings = registry.ConfigurationWarnings.Where(w => w.Contains($"'{name}'", StringComparison.OrdinalIgnoreCase)).ToList(),
         }, JsonOpts.Default);
+    }
+
+    /// <summary>
+    /// Exercise the management channel the way the tools do: reach WP-CLI, confirm the path holds a
+    /// WordPress install, and check that install is the site the endpoint claims.
+    /// </summary>
+    private static async Task<(object Result, bool Working)> TestManagementAsync(
+        ManagementService management, string name, List<string> problems, CancellationToken ct)
+    {
+        ManagementService.Target target;
+        try
+        {
+            target = management.Resolve(name, "wp_test_endpoint");
+        }
+        catch (ModelContextProtocol.McpException ex)
+        {
+            problems.Add("Management: " + ex.Message);
+            return (new { configured = true, enabled = true, working = false, detail = ex.Message }, false);
+        }
+
+        var version = await management.RunAsync(target, new[] { "core", "version" }, ct);
+        if (!version.Success)
+        {
+            var detail = $"WP-CLI could not read the WordPress install at '{target.Path}'. {ManagementService.Describe(version)}";
+            problems.Add("Management: " + detail);
+            return (new
+            {
+                configured = true,
+                enabled = true,
+                working = false,
+                mode = target.Mode,
+                path = target.Path,
+                detail,
+                fix = $"Check Endpoints:{name}:{target.Mode}:Path points at the directory containing wp-config.php, and that WP-CLI is installed.",
+            }, false);
+        }
+
+        var siteUrl = await management.RunAsync(target, new[] { "option", "get", "siteurl" }, ct);
+        var expected = target.Endpoint.EffectiveUrl;
+        var identityOk = true;
+        string? identityDetail = null;
+
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            identityOk = false;
+            identityDetail = $"No Url or RestApi:BaseUrl is set, so the identity cross-check cannot run. Set Endpoints:{name}:Url to '{siteUrl.Output}'.";
+            problems.Add("Management: " + identityDetail);
+        }
+        else if (!UrlsEquivalent(siteUrl.Output, expected!))
+        {
+            identityOk = false;
+            identityDetail = $"The install at '{target.Path}' reports '{siteUrl.Output}', but this endpoint expects '{expected}'. " +
+                             "Mutating tools will refuse to run until this is resolved — the path may point at a different site on this host.";
+            problems.Add("Management: " + identityDetail);
+        }
+
+        return (new
+        {
+            configured = true,
+            enabled = true,
+            working = identityOk,
+            mode = target.Mode,
+            path = target.Path,
+            wordPressVersion = version.Output,
+            siteUrl = siteUrl.Output,
+            identityCheck = identityOk ? "passed" : "failed",
+            detail = identityDetail ?? $"WP-CLI reachable; WordPress {version.Output} at {siteUrl.Output}.",
+        }, identityOk);
+    }
+
+    private static bool UrlsEquivalent(string a, string b)
+    {
+        static string Normalize(string value) => value.Trim().TrimEnd('/')
+            .Replace("https://", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("http://", string.Empty, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(Normalize(a), Normalize(b), StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveDefaultDescription(EndpointRegistry registry)

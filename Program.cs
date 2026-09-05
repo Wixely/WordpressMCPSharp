@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.WindowsServices;
+using Microsoft.Extensions.Options;
 using Serilog;
 
 namespace WordpressMCPSharp;
@@ -70,10 +71,16 @@ public static class Program
                 builder.Configuration.GetSection(ServerOptions.SectionName));
             // Endpoints and DefaultSite live at the configuration root.
             builder.Services.Configure<RegistryOptions>(builder.Configuration);
+            builder.Services.Configure<ManagementOptions>(
+                builder.Configuration.GetSection(ManagementOptions.SectionName));
+            builder.Services.Configure<SnapshotOptions>(
+                builder.Configuration.GetSection(SnapshotOptions.SectionName));
 
             builder.Services.AddSingleton<EndpointRegistry>();
             builder.Services.AddSingleton<SetupDiagnosticsService>();
             builder.Services.AddSingleton<UpdateCheckService>();
+            builder.Services.AddSingleton<ManagementService>();
+            builder.Services.AddSingleton<SnapshotService>();
 
             builder.Services
                 .AddMcpServer()
@@ -112,11 +119,17 @@ public static class Program
             var registry = app.Services.GetRequiredService<EndpointRegistry>();
             var wordpress = registry.Options;
 
+            var managementOptions = app.Services.GetRequiredService<IOptions<ManagementOptions>>().Value;
+            var snapshotOptions = app.Services.GetRequiredService<IOptions<SnapshotOptions>>().Value;
+
             var details = new List<string>
             {
                 $"Read-only: {wordpress.ReadOnly}",
                 $"Allow delete: {wordpress.AllowDelete}",
                 $"Allow plugin install: {wordpress.AllowPluginInstall}",
+                $"CLI management: {(managementOptions.AllowCliManagement ? "enabled" : "disabled")}" +
+                    (managementOptions.AllowCliManagement && managementOptions.AllowArbitraryCli ? " (arbitrary commands allowed)" : string.Empty),
+                $"Snapshot restore: {(snapshotOptions.AllowRestore ? "allowed" : "blocked")}",
                 $"Endpoints: {registry.Count}{(registry.LegacyMapped ? " (from legacy Wordpress:BaseUrl)" : string.Empty)}",
             };
             details.AddRange(registry.All.Select(entry =>
@@ -145,6 +158,8 @@ public static class Program
                 path = server.Path,
                 readOnly = wordpress.ReadOnly,
                 allowDelete = wordpress.AllowDelete,
+                cliManagement = managementOptions.AllowCliManagement,
+                allowRestore = snapshotOptions.AllowRestore,
                 endpoints = registry.All.Select(entry => new
                 {
                     name = entry.Name,

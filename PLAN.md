@@ -1,5 +1,9 @@
 # WordpressMCPSharp — Roadmap
 
+> **Status: all five phases are shipped** (122 tools). This document is kept as the design record —
+> what the REST API can and cannot do, why the two-channel architecture exists, and what each phase
+> delivered. Verification notes are at the end of each phase.
+
 Goal: install, configure, update, maintain and diagnose WordPress sites end to end —
 build-out, plugin management, snapshots/backups and restore, content and page management
 for clients (including covers/featured images), user management, and data management in
@@ -227,10 +231,11 @@ unknown-site and channel errors, per-endpoint lockdown) and the probe cases
    `Endpoints` shape, with a "Getting started: run `wp_setup_probe` against your site
    URL" walkthrough as the first section.
 
-### Phase 2 — REST coverage
+### Phase 2 — REST coverage — **DONE**
 
-New options: `EnableWooCommerce` (default true), `EnableSiteHealth` (default true),
-`AllowRestPassthrough` (default false, second gate).
+Shipped in `8580583`. New options: `EnableWooCommerce`, `EnableSiteHealth`, `AllowRestPassthrough`.
+Verified on the WSL rig: full WooCommerce product lifecycle, health report, update check across four
+plugins and three themes, passthrough reads and writes, featured image, clone, and find/replace.
 
 1. **Generic REST passthrough** — `wp_rest_request(site, method, route, bodyJson?, query?)`
    for any namespace discovered via `wp_site_info`. GET allowed in read-only mode;
@@ -256,11 +261,13 @@ New options: `EnableWooCommerce` (default true), `EnableSiteHealth` (default tru
    `wp_list_navigation` (wp_navigation posts) so page building works on modern
    block themes, not just classic menus.
 
-### Phase 3 — Management channel + lifecycle
+### Phase 3 — Management channel + lifecycle — **DONE**
 
-Global gates: `Management:AllowCliManagement` (master, default false) and
-`Management:AllowArbitraryCli` (default false, raw escape hatch only). Global
-`Management:CommandTimeoutSeconds`.
+Gates: `Management:AllowCliManagement` (master), `AllowArbitraryCli` (raw escape hatch),
+`AllowProvisioning`. SSH uses SSH.NET, matching RemoteAdminMCPSharp. Verified: the identity
+cross-check refusing a deliberately mismatched endpoint, permalinks, cron, cache, maintenance mode,
+plugin updates, dry-run search-replace, config read/write with credential refusal, the CLI
+deny-list, and provisioning a second site from nothing (idempotent on re-run).
 
 1. **Channel plumbing** — `ManagementService` with one execution primitive per mode
    (argument-list based, no shell string interpolation), timeout, output capture,
@@ -281,11 +288,13 @@ Global gates: `Management:AllowCliManagement` (master, default false) and
 5. **Management-side setup diagnostics** — `wp_setup_probe_ssh` (including discovery of
    other WordPress installs on the host) and the management half of `wp_test_endpoint`.
 
-### Phase 4 — Snapshots, backup, restore
+### Phase 4 — Snapshots, backup, restore — **DONE**
 
-New options: `Snapshots:{Directory, MaxSnapshots, IncludeUploads}` and gate
-`AllowRestore` (default false — restoring overwrites the site). Snapshots are stored
-per endpoint (`<Directory>/<site>/<timestamp>/`).
+Options `Snapshots:{Directory, MaxSnapshots, IncludeUploads, AllowRestore}`. Snapshots live on the
+managed host at `<Directory>/<site>/<timestamp>/`, so nothing large crosses the wire. Verified:
+a 28 MB snapshot captured, a post created, restore performed, and that post confirmed gone (404) —
+with an automatic pre-restore safety snapshot, retention pruning to `MaxSnapshots`, and refusals for
+a mismatched `confirm` and for a snapshot from another site.
 
 1. `wp_create_snapshot` — `wp db export` + tar of `wp-content` (optionally uploads),
    manifest JSON (WP version, plugin list + versions, active theme, site URL, sizes,
@@ -299,7 +308,12 @@ per endpoint (`<Directory>/<site>/<timestamp>/`).
 5. `wp_export_content` / `wp_import_content` — WXR export/import for content-only
    moves between sites (CLI `export`/`import`).
 
-### Phase 5 — Diagnostics & client operations polish
+### Phase 5 — Diagnostics & client operations polish — **DONE**
+
+Verified: `wp_diagnose` runs both channels and marks the other's checks `skipped` on a single-channel
+endpoint; debug-log tooling; and the plugin bisect. Two environment failures that turned out to be
+common real-world hosting problems now produce named, actionable errors instead of raw exit codes —
+missing MySQL client tools, and PHP CLI memory exhaustion during `core download`.
 
 1. **Log tooling** — `wp_read_debug_log` (tail with size cap), `wp_clear_debug_log`,
    `wp_set_debug` (WP_DEBUG/WP_DEBUG_LOG via `config set`).
