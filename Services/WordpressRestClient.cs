@@ -21,6 +21,9 @@ public sealed class WordpressRestClient : IDisposable
     private readonly HttpClient _http;
     private readonly Uri _baseUri;
     private bool? _restPrefixPretty;
+    private IReadOnlyList<string>? _namespaces;
+    private string? _coreVersion;
+    private bool _coreVersionProbed;
     private bool _disposed;
 
     public WordpressRestClient(
@@ -213,6 +216,71 @@ public sealed class WordpressRestClient : IDisposable
     /// <summary>True when the site serves the REST API from pretty /wp-json/ URLs.</summary>
     public async Task<bool> UsesPrettyPermalinksAsync(CancellationToken ct)
         => _restPrefixPretty ??= await DetectPrettyPermalinksAsync(ct);
+
+    /// <summary>
+    /// The REST namespaces the site exposes, cached for the lifetime of the client. Lets tools check
+    /// that a plugin's API (wc/v3, for example) is actually present before calling it.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetNamespacesAsync(CancellationToken ct, bool refresh = false)
+    {
+        if (_namespaces is not null && !refresh) return _namespaces;
+
+        var root = await GetJsonAsync("wp-json/", ct);
+        var found = (root?["namespaces"] as JsonArray)?
+            .Select(n => n?.GetValue<string?>())
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n!)
+            .ToList() ?? new List<string>();
+
+        return _namespaces = found;
+    }
+
+    /// <summary>
+    /// A namespace can appear the moment a plugin is activated, so a cached "no" is re-checked
+    /// against the live site before any caller treats it as final.
+    /// </summary>
+    public async Task<bool> HasNamespaceAsync(string ns, CancellationToken ct)
+    {
+        if ((await GetNamespacesAsync(ct)).Contains(ns, StringComparer.OrdinalIgnoreCase))
+            return true;
+
+        return (await GetNamespacesAsync(ct, refresh: true)).Contains(ns, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Drop cached facts about the site after an operation that can change them (plugin/theme changes).</summary>
+    public void InvalidateSiteCache()
+    {
+        _namespaces = null;
+        _coreVersion = null;
+        _coreVersionProbed = false;
+        _restPrefixPretty = null;
+    }
+
+    /// <summary>
+    /// WordPress does not expose its version over the core REST API, so read the generator meta tag
+    /// from the front page. Returns null when the site strips it (many security plugins do).
+    /// </summary>
+    public async Task<string?> TryGetCoreVersionAsync(CancellationToken ct)
+    {
+        if (_coreVersionProbed) return _coreVersion;
+        _coreVersionProbed = true;
+
+        try
+        {
+            using var response = await _http.GetAsync(string.Empty, ct);
+            if (!response.IsSuccessStatusCode) return null;
+            var html = await response.Content.ReadAsStringAsync(ct);
+            var match = System.Text.RegularExpressions.Regex.Match(
+                html,
+                @"<meta[^>]+name=[""']generator[""'][^>]+content=[""']WordPress\s+([0-9][^""']*)[""']",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            return _coreVersion = match.Success ? match.Groups[1].Value.Trim() : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// A fresh WordPress install ships with "plain" permalinks, where /wp-json/ is not routed and the REST

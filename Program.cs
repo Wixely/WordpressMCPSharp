@@ -73,6 +73,7 @@ public static class Program
 
             builder.Services.AddSingleton<EndpointRegistry>();
             builder.Services.AddSingleton<SetupDiagnosticsService>();
+            builder.Services.AddSingleton<UpdateCheckService>();
 
             builder.Services
                 .AddMcpServer()

@@ -67,6 +67,12 @@ public sealed class WordpressOptions
     /// <summary>If false, the setup/diagnostic tools are disabled.</summary>
     public bool EnableSetupDiagnostics { get; set; } = true;
 
+    /// <summary>If false, WooCommerce store tools are disabled.</summary>
+    public bool EnableWooCommerce { get; set; } = true;
+
+    /// <summary>If false, site-health and update-check tools are disabled.</summary>
+    public bool EnableSiteHealth { get; set; } = true;
+
     // ---- Tuning -------------------------------------------------------------------------------
 
     /// <summary>Optional directory where downloaded media files are written. Falls back to the system temp directory.</summary>

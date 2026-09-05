@@ -66,6 +66,7 @@ public static class PluginTools
         var body = new JsonObject { ["slug"] = slug };
         if (activate) body["status"] = "active";
         var result = await svc.SendJsonAsync(HttpMethod.Post, "wp-json/wp/v2/plugins", body, ct);
+        svc.InvalidateSiteCache();
         if (result is JsonObject obj) obj.Remove("_links");
         return result?.ToJsonString(JsonOpts.Default) ?? "null";
     }
@@ -108,6 +109,8 @@ public static class PluginTools
         svc.EnsureFeature(svc.Options.EnablePlugins, "Plugin");
         svc.EnsureWriteAllowed(operation);
         var result = await svc.SendJsonAsync(HttpMethod.Put, $"wp-json/wp/v2/plugins/{ValidatePlugin(plugin)}", new { status }, ct);
+        // Activating or deactivating a plugin can add or remove REST namespaces.
+        svc.InvalidateSiteCache();
         return JsonSerializer.Serialize(new
         {
             plugin = result?["plugin"]?.GetValue<string?>() ?? plugin,
