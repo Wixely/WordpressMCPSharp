@@ -56,6 +56,72 @@ fallback) and RemoteAdminMCPSharp's double-gated command execution. Modes:
 All channel tools are additionally gated (see Safety) and every invocation shells to
 `wp` with `--path` pinned from configuration — never a free-form working directory.
 
+## Channel model
+
+The two channels are **independent**. Any of these deployments is valid:
+
+| Deployment | REST configured | CLI configured | What works |
+| --- | --- | --- | --- |
+| Content/API management (v0.1 behaviour) | yes | no | REST tools only |
+| Ops-only (SSH box, no app password issued) | no | yes | CLI tools only |
+| Full lifecycle | yes | yes | everything, incl. composite diagnostics |
+
+Rules:
+
+1. **Neither channel is required.** The server must start (and pass `/healthz`) with only
+   one — or neither — configured. This requires a v0.1 fix: `WordpressService` currently
+   throws at construction when `Wordpress:BaseUrl` is missing; REST configuration must be
+   validated lazily at call time instead.
+2. **Every tool belongs to exactly one channel**, marked in the README tool list
+   (`[REST]` / `[CLI]`). The only exceptions are composite diagnostics (`wp_diagnose`),
+   which run the checks available on whichever channels are configured and report the
+   skipped ones as `"skipped": "channel not configured"` rather than failing.
+3. **Proper errors, family style.** A tool whose channel is not configured throws a
+   `McpException` naming the exact keys to set, e.g.:
+   - `MCP tool 'wp_core_update' requires the CLI management channel. Set Management:Mode
+     (Local/Ssh/Docker) and configure Management:Sites. Current mode: None.`
+   - `MCP tool 'wp_create_post' requires the REST channel. Set Wordpress:BaseUrl,
+     Wordpress:Username and Wordpress:ApplicationPassword.`
+   Consistent with the rest of the family, tools stay visible in `tools/list` and fail
+   with these errors when called (same behaviour as the existing feature toggles).
+4. Startup banner and `/healthz` report each channel's status independently
+   (`rest: configured/unconfigured`, `management: None/Local/Ssh/Docker`).
+
+## Site targeting (multi-site SSH hosts)
+
+An SSH host often serves several WordPress installs. Guard rails:
+
+1. **Named site registry, never raw paths.** CLI-backed tools take an optional `site`
+   parameter that resolves against configuration only:
+
+   ```json
+   "Management": {
+     "Mode": "Ssh",
+     "Ssh": { "Host": "web1.example.com", "Username": "deploy", "PrivateKeyPath": "..." },
+     "DefaultSite": "clienta",
+     "Sites": {
+       "clienta": { "Path": "/var/www/clienta.com", "Url": "https://clienta.com" },
+       "clientb": { "Path": "/var/www/clientb.net", "Url": "https://clientb.net" }
+     }
+   }
+   ```
+
+   An MCP client can never supply a filesystem path. Unknown `site` values fail with an
+   error that lists the configured site names. With no `site` argument, `DefaultSite`
+   is used; if neither is set and more than one site is configured, the tool errors
+   rather than guessing.
+2. **Identity cross-check before mutating.** Before any mutating CLI operation, the
+   service runs `wp option get siteurl --path=<site path>` and compares it to the
+   profile's `Url` (when set, case-insensitive, ignoring scheme). Mismatch → refuse with
+   both values in the error. This catches stale paths, moved installs, and copy-paste
+   config mistakes — a wrong-site write is the worst failure mode this server has.
+3. **REST↔CLI correlation is explicit.** Composite tools that combine channels
+   (`wp_diagnose`, snapshot manifests) only treat the REST site and a CLI site as the
+   same site when the site profile's `Url` matches `Wordpress:BaseUrl`; otherwise the
+   CLI half runs per-site and the REST half is reported separately.
+4. `wp_list_sites` (CLI channel) returns the configured registry — names, paths,
+   URLs, and each site's cross-check status — so clients can discover valid targets.
+
 ## Plan
 
 ### Phase 1 — REST coverage (no new channel)
@@ -63,6 +129,9 @@ All channel tools are additionally gated (see Safety) and every invocation shell
 New options: `EnableWooCommerce` (default true), `EnableSiteHealth` (default true),
 `AllowRestPassthrough` (default false, second gate).
 
+0. **Channel-independence groundwork** — make REST configuration lazy: move the
+   `BaseUrl` check out of the `WordpressService` constructor into call-time validation
+   with the channel-error message above, so a CLI-only deployment starts cleanly.
 1. **Generic REST passthrough** — `wp_rest_request(method, route, bodyJson?, query?)`
    for any namespace discovered via `wp_site_info`. GET allowed in read-only mode;
    mutating verbs need write mode; the tool itself needs `AllowRestPassthrough=true`.
@@ -89,14 +158,16 @@ New options: `EnableWooCommerce` (default true), `EnableSiteHealth` (default tru
 ### Phase 2 — Management channel + lifecycle
 
 New options section `Management`: `Mode` (None/Local/Ssh/Docker), `WpCliPath`,
-`SitePath`, `Ssh:{Host,Port,Username,PrivateKeyPath,Password}`, `Docker:{Container}`,
-plus gates `AllowCliManagement` (master, default false) and `AllowArbitraryCli`
-(default false, for the raw escape hatch only).
+`Sites` + `DefaultSite` (the registry above), `Ssh:{Host,Port,Username,PrivateKeyPath,Password}`,
+`Docker:{Container}`, plus gates `AllowCliManagement` (master, default false) and
+`AllowArbitraryCli` (default false, for the raw escape hatch only).
 
 1. **Channel plumbing** — `ManagementService` with one execution primitive
    (argument-list based, no shell string interpolation), timeout, output capture,
-   and structured `{exitCode, stdout, stderr}` results. Startup banner reports the
-   active mode; `/healthz` gains a `management` field.
+   and structured `{exitCode, stdout, stderr}` results. Site resolution + identity
+   cross-check live here so every CLI tool inherits them. Startup banner reports the
+   active mode and site count; `/healthz` gains a `management` field. `wp_list_sites`
+   ships in this step.
 2. **Maintenance tools** — `wp_core_version` (+ available updates), `wp_core_update`,
    `wp_core_verify_checksums`, `wp_update_plugin`, `wp_update_all_plugins`,
    `wp_install_theme`, `wp_update_theme`, `wp_activate_theme`,
@@ -157,3 +228,10 @@ Phase 1 and the Docker channel mode. Add WooCommerce to the test site for the `w
 tools, and cover: snapshot → mutate site → restore → verify content reverted; core
 update path on a pinned older wordpress image; provisioning a second fresh site from
 nothing via the Docker channel.
+
+Channel-model cases: start with REST unconfigured and confirm clean startup, healthy
+`/healthz`, working CLI tools, and the channel error from REST tools; the mirror case
+with `Management:Mode=None`; two registered sites where the identity cross-check
+refuses a mutation when a profile's `Url` deliberately mismatches the install; an
+unknown `site` argument returning the configured-names error; and no `DefaultSite`
+with multiple sites erroring instead of guessing.
