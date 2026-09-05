@@ -13,13 +13,15 @@ public static class CommentTools
     [McpServerTool(Name = "wp_list_comments"),
      Description("List comments with optional filters. Returns slim metadata plus pagination totals.")]
     public static async Task<string> ListComments(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Filter: post id.")] int? postId = null,
         [Description("Status filter: approve, hold, spam, trash, or all. Defaults to approve.")] string? status = null,
         [Description("Free-text search.")] string? search = null,
         [Description("Page number (1-based). Defaults to 1.")] int page = 1,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_comments");
         svc.EnsureFeature(svc.Options.EnableComments, "Comment");
         var qs = new List<string> { $"page={Math.Max(1, page)}", $"per_page={svc.Options.DefaultPageSize}", "context=edit" };
         if (postId.HasValue) qs.Add($"post={postId.Value}");
@@ -46,10 +48,12 @@ public static class CommentTools
     [McpServerTool(Name = "wp_get_comment"),
      Description("Get one comment by id.")]
     public static async Task<string> GetComment(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Comment id.")] int id,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_get_comment");
         svc.EnsureFeature(svc.Options.EnableComments, "Comment");
         var node = await svc.GetJsonAsync($"wp-json/wp/v2/comments/{id}?context=edit", ct);
         if (node is JsonObject obj) obj.Remove("_links");
@@ -59,14 +63,16 @@ public static class CommentTools
     [McpServerTool(Name = "wp_create_comment"),
      Description("Create a comment on a post (as the authenticated user, or with an explicit author name/email). Requires write mode.")]
     public static async Task<string> CreateComment(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Post id to comment on.")] int postId,
         [Description("Comment text (HTML allowed).")] string content,
         [Description("Optional parent comment id for a threaded reply.")] int? parentId = null,
         [Description("Optional author display name (for comments not tied to a WP user).")] string? authorName = null,
         [Description("Optional author email (for comments not tied to a WP user).")] string? authorEmail = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_create_comment");
         svc.EnsureFeature(svc.Options.EnableComments, "Comment");
         svc.EnsureWriteAllowed("wp_create_comment");
 
@@ -87,12 +93,14 @@ public static class CommentTools
     [McpServerTool(Name = "wp_update_comment"),
      Description("Update a comment's content or moderation status (approve/hold/spam/trash). Requires write mode.")]
     public static async Task<string> UpdateComment(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Comment id.")] int id,
         [Description("New comment text.")] string? content = null,
         [Description("New status: approve (or approved), hold, spam, trash.")] string? status = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_update_comment");
         svc.EnsureFeature(svc.Options.EnableComments, "Comment");
         svc.EnsureWriteAllowed("wp_update_comment");
 
@@ -111,11 +119,13 @@ public static class CommentTools
     [McpServerTool(Name = "wp_delete_comment"),
      Description("Move a comment to trash (default), or permanently delete with force=true. Permanent deletion requires Wordpress:AllowDelete=true.")]
     public static async Task<string> DeleteComment(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Comment id.")] int id,
         [Description("If true, bypass trash and delete permanently.")] bool force = false,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_delete_comment");
         svc.EnsureFeature(svc.Options.EnableComments, "Comment");
         if (force) svc.EnsureDeleteAllowed("wp_delete_comment");
         else svc.EnsureWriteAllowed("wp_delete_comment");

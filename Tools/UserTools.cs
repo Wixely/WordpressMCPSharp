@@ -13,12 +13,14 @@ public static class UserTools
     [McpServerTool(Name = "wp_list_users"),
      Description("List users with roles and emails. Returns slim metadata plus pagination totals.")]
     public static async Task<string> ListUsers(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Free-text search (name, email, login).")] string? search = null,
         [Description("Filter: role slug, e.g. administrator, editor, author, contributor, subscriber.")] string? role = null,
         [Description("Page number (1-based). Defaults to 1.")] int page = 1,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_users");
         svc.EnsureFeature(svc.Options.EnableUsers, "User");
         var qs = new List<string> { $"page={Math.Max(1, page)}", $"per_page={svc.Options.DefaultPageSize}", "context=edit" };
         if (!string.IsNullOrWhiteSpace(search)) qs.Add($"search={Uri.EscapeDataString(search)}");
@@ -41,10 +43,12 @@ public static class UserTools
     [McpServerTool(Name = "wp_get_user"),
      Description("Get one user by id, including roles and capabilities.")]
     public static async Task<string> GetUser(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("User id.")] int id,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_get_user");
         svc.EnsureFeature(svc.Options.EnableUsers, "User");
         var node = await svc.GetJsonAsync($"wp-json/wp/v2/users/{id}?context=edit", ct);
         if (node is JsonObject obj) obj.Remove("_links");
@@ -54,9 +58,11 @@ public static class UserTools
     [McpServerTool(Name = "wp_get_me"),
      Description("Get the currently authenticated user (the account this MCP server operates as).")]
     public static async Task<string> GetMe(
-        WordpressService svc,
+        EndpointRegistry registry,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_get_me");
         var node = await svc.GetJsonAsync("wp-json/wp/v2/users/me?context=edit", ct);
         if (node is JsonObject obj) obj.Remove("_links");
         return node?.ToJsonString(JsonOpts.Default) ?? "null";
@@ -65,7 +71,7 @@ public static class UserTools
     [McpServerTool(Name = "wp_create_user"),
      Description("Create a user account. Requires write mode.")]
     public static async Task<string> CreateUser(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Login name.")] string username,
         [Description("Email address.")] string email,
         [Description("Initial password.")] string password,
@@ -73,8 +79,10 @@ public static class UserTools
         [Description("Optional display name.")] string? displayName = null,
         [Description("Optional first name.")] string? firstName = null,
         [Description("Optional last name.")] string? lastName = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_create_user");
         svc.EnsureFeature(svc.Options.EnableUsers, "User");
         svc.EnsureWriteAllowed("wp_create_user");
 
@@ -97,7 +105,7 @@ public static class UserTools
     [McpServerTool(Name = "wp_update_user"),
      Description("Update a user's fields (email, role, names, password). Requires write mode.")]
     public static async Task<string> UpdateUser(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("User id.")] int id,
         [Description("New email address.")] string? email = null,
         [Description("New role slug (replaces existing roles).")] string? role = null,
@@ -107,8 +115,10 @@ public static class UserTools
         [Description("New password.")] string? password = null,
         [Description("New description/bio.")] string? description = null,
         [Description("New website URL.")] string? url = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_update_user");
         svc.EnsureFeature(svc.Options.EnableUsers, "User");
         svc.EnsureWriteAllowed("wp_update_user");
 
@@ -133,11 +143,13 @@ public static class UserTools
     [McpServerTool(Name = "wp_delete_user"),
      Description("Permanently delete a user, reassigning their content to another user. Requires Wordpress:AllowDelete=true.")]
     public static async Task<string> DeleteUser(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("User id to delete.")] int id,
         [Description("User id that inherits the deleted user's posts.")] int reassignToUserId,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_delete_user");
         svc.EnsureFeature(svc.Options.EnableUsers, "User");
         svc.EnsureDeleteAllowed("wp_delete_user");
         await svc.SendJsonAsync(HttpMethod.Delete, $"wp-json/wp/v2/users/{id}?force=true&reassign={reassignToUserId}", null, ct);
@@ -147,10 +159,12 @@ public static class UserTools
     [McpServerTool(Name = "wp_list_application_passwords"),
      Description("List application passwords registered for a user (names and last-used metadata only, never secrets).")]
     public static async Task<string> ListApplicationPasswords(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("User id, or 'me' via wp_get_me first.")] int userId,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_application_passwords");
         svc.EnsureFeature(svc.Options.EnableUsers, "User");
         var node = await svc.GetJsonAsync($"wp-json/wp/v2/users/{userId}/application-passwords", ct);
         return node?.ToJsonString(JsonOpts.Default) ?? "[]";
@@ -159,11 +173,13 @@ public static class UserTools
     [McpServerTool(Name = "wp_create_application_password"),
      Description("Create a new application password for a user. The plaintext password is returned ONCE by WordPress — store it securely. Requires write mode.")]
     public static async Task<string> CreateApplicationPassword(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("User id.")] int userId,
         [Description("Name identifying what the password is for.")] string name,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_create_application_password");
         svc.EnsureFeature(svc.Options.EnableUsers, "User");
         svc.EnsureWriteAllowed("wp_create_application_password");
         var result = await svc.SendJsonAsync(HttpMethod.Post, $"wp-json/wp/v2/users/{userId}/application-passwords", new { name }, ct);
@@ -173,11 +189,13 @@ public static class UserTools
     [McpServerTool(Name = "wp_delete_application_password"),
      Description("Revoke one of a user's application passwords by UUID. Requires Wordpress:AllowDelete=true.")]
     public static async Task<string> DeleteApplicationPassword(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("User id.")] int userId,
         [Description("Application password UUID (from wp_list_application_passwords).")] string uuid,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_delete_application_password");
         svc.EnsureFeature(svc.Options.EnableUsers, "User");
         svc.EnsureDeleteAllowed("wp_delete_application_password");
         await svc.SendJsonAsync(HttpMethod.Delete, $"wp-json/wp/v2/users/{userId}/application-passwords/{Uri.EscapeDataString(uuid)}", null, ct);

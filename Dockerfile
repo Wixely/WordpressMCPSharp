@@ -46,7 +46,14 @@ ENV DOTNET_ENVIRONMENT=Production \
     WORDPRESSMCP_Server__Password= \
     WORDPRESSMCP_Wordpress__ReadOnly=true \
     WORDPRESSMCP_Wordpress__AllowDelete=false \
-    WORDPRESSMCP_Wordpress__AllowPluginInstall=false
+    WORDPRESSMCP_Wordpress__AllowPluginInstall=false \
+    WORDPRESSMCP_Wordpress__AllowRestPassthrough=false
+
+# Configure sites at run time, for example:
+#   -e WORDPRESSMCP_Endpoints__site1__RestApi__BaseUrl=https://example.com/ \
+#   -e WORDPRESSMCP_Endpoints__site1__RestApi__Username=admin \
+#   -e "WORDPRESSMCP_Endpoints__site1__RestApi__ApplicationPassword=xxxx xxxx xxxx xxxx" \
+#   -e WORDPRESSMCP_DefaultSite=site1
 
 RUN mkdir -p /app/logs && chown -R $APP_UID:0 /app
 COPY --from=build --chown=$APP_UID:0 /app/publish ./

@@ -13,7 +13,7 @@ public static class PostTools
     [McpServerTool(Name = "wp_list_posts"),
      Description("List posts with optional filters. Returns slim metadata plus pagination totals. Use wp_get_post for full detail.")]
     public static async Task<string> ListPosts(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Free-text search across title and content.")] string? search = null,
         [Description("Status filter: publish, future, draft, pending, private, trash, or any (comma-separated allowed). Defaults to publish.")] string? status = null,
         [Description("Filter: author user id.")] int? authorId = null,
@@ -24,8 +24,10 @@ public static class PostTools
         [Description("Order by: date, modified, title, slug, id, author, include. Defaults to date.")] string? orderby = null,
         [Description("Order direction: asc or desc. Defaults to desc.")] string? order = null,
         [Description("Page number (1-based). Defaults to 1.")] int page = 1,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_posts");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         var qs = new List<string> { $"page={Math.Max(1, page)}", $"per_page={svc.Options.DefaultPageSize}", "context=edit" };
         if (!string.IsNullOrWhiteSpace(search)) qs.Add($"search={Uri.EscapeDataString(search)}");
@@ -46,10 +48,12 @@ public static class PostTools
     [McpServerTool(Name = "wp_get_post"),
      Description("Get full metadata for one post by id (content body omitted — use wp_get_post_content).")]
     public static async Task<string> GetPost(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Post id.")] int id,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_get_post");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         var node = await svc.GetJsonAsync($"wp-json/wp/v2/posts/{id}?context=edit", ct);
         return node is JsonObject obj
@@ -60,12 +64,14 @@ public static class PostTools
     [McpServerTool(Name = "wp_get_post_content"),
      Description("Return a post or page body. Content larger than Wordpress:MaxInlineContentBytes is truncated with a flag.")]
     public static async Task<string> GetPostContent(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Post or page id.")] int id,
         [Description("Content type of the id: post or page. Defaults to post.")] string type = "post",
         [Description("If true, return the raw block/HTML source instead of the rendered HTML.")] bool raw = false,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_get_post_content");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         var collection = ResolveCollection(type);
         var node = await svc.GetJsonAsync($"wp-json/wp/v2/{collection}/{id}?context=edit", ct);
@@ -93,7 +99,7 @@ public static class PostTools
     [McpServerTool(Name = "wp_create_post"),
      Description("Create a post. Content accepts HTML or block markup. Requires write mode.")]
     public static async Task<string> CreatePost(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Post title.")] string title,
         [Description("Post body (HTML or block markup).")] string content,
         [Description("Status: draft, publish, pending, private, future. Defaults to draft.")] string status = "draft",
@@ -106,8 +112,10 @@ public static class PostTools
         [Description("Comment status: open or closed.")] string? commentStatus = null,
         [Description("Publish date (ISO 8601, site timezone). Combine with status=future to schedule.")] string? date = null,
         [Description("Pin the post to the front page.")] bool sticky = false,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_create_post");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         svc.EnsureWriteAllowed("wp_create_post");
 
@@ -134,7 +142,7 @@ public static class PostTools
     [McpServerTool(Name = "wp_update_post"),
      Description("Update a post's fields (PATCH semantics — only supplied fields change). Requires write mode.")]
     public static async Task<string> UpdatePost(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Post id.")] int id,
         [Description("New title.")] string? title = null,
         [Description("New body (HTML or block markup).")] string? content = null,
@@ -148,8 +156,10 @@ public static class PostTools
         [Description("Comment status: open or closed.")] string? commentStatus = null,
         [Description("New publish date (ISO 8601).")] string? date = null,
         [Description("Set sticky state.")] bool? sticky = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_update_post");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         svc.EnsureWriteAllowed("wp_update_post");
 
@@ -177,11 +187,13 @@ public static class PostTools
     [McpServerTool(Name = "wp_delete_post"),
      Description("Move a post to trash (default), or permanently delete with force=true. Permanent deletion requires Wordpress:AllowDelete=true.")]
     public static async Task<string> DeletePost(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Post id.")] int id,
         [Description("If true, bypass trash and delete permanently.")] bool force = false,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_delete_post");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         if (force) svc.EnsureDeleteAllowed("wp_delete_post");
         else svc.EnsureWriteAllowed("wp_delete_post");
@@ -199,11 +211,13 @@ public static class PostTools
     [McpServerTool(Name = "wp_list_post_revisions"),
      Description("List revisions of a post or page.")]
     public static async Task<string> ListPostRevisions(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Post or page id.")] int id,
         [Description("Content type of the id: post or page. Defaults to post.")] string type = "post",
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_post_revisions");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         var collection = ResolveCollection(type);
         var node = await svc.GetJsonAsync($"wp-json/wp/v2/{collection}/{id}/revisions", ct);

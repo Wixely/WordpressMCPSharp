@@ -12,10 +12,12 @@ public static class ThemeTools
     [McpServerTool(Name = "wp_list_themes"),
      Description("List installed themes with status and versions. The core REST API cannot switch themes — activation must happen in wp-admin or WP-CLI.")]
     public static async Task<string> ListThemes(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Filter: active or inactive.")] string? status = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_themes");
         svc.EnsureFeature(svc.Options.EnableThemes, "Theme");
         var url = "wp-json/wp/v2/themes" + (string.IsNullOrWhiteSpace(status) ? string.Empty : $"?status={Uri.EscapeDataString(status)}");
         var node = await svc.GetJsonAsync(url, ct);
@@ -37,9 +39,11 @@ public static class ThemeTools
     [McpServerTool(Name = "wp_get_active_theme"),
      Description("Get full detail for the currently active theme, including supports and theme URI.")]
     public static async Task<string> GetActiveTheme(
-        WordpressService svc,
+        EndpointRegistry registry,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_get_active_theme");
         svc.EnsureFeature(svc.Options.EnableThemes, "Theme");
         var node = await svc.GetJsonAsync("wp-json/wp/v2/themes?status=active", ct);
         var active = (node as JsonArray)?.FirstOrDefault() as JsonObject;

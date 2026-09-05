@@ -13,15 +13,17 @@ public static class PageTools
     [McpServerTool(Name = "wp_list_pages"),
      Description("List pages with optional filters. Returns slim metadata plus pagination totals. Use wp_get_page for full detail.")]
     public static async Task<string> ListPages(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Free-text search across title and content.")] string? search = null,
         [Description("Status filter: publish, future, draft, pending, private, trash, or any. Defaults to publish.")] string? status = null,
         [Description("Filter: parent page id (0 for top-level pages).")] int? parentId = null,
         [Description("Order by: date, modified, title, slug, id, menu_order. Defaults to date.")] string? orderby = null,
         [Description("Order direction: asc or desc. Defaults to desc.")] string? order = null,
         [Description("Page number (1-based). Defaults to 1.")] int page = 1,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_pages");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         var qs = new List<string> { $"page={Math.Max(1, page)}", $"per_page={svc.Options.DefaultPageSize}", "context=edit" };
         if (!string.IsNullOrWhiteSpace(search)) qs.Add($"search={Uri.EscapeDataString(search)}");
@@ -38,10 +40,12 @@ public static class PageTools
     [McpServerTool(Name = "wp_get_page"),
      Description("Get full metadata for one page by id (content body omitted — use wp_get_post_content with type=page).")]
     public static async Task<string> GetPage(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Page id.")] int id,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_get_page");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         var node = await svc.GetJsonAsync($"wp-json/wp/v2/pages/{id}?context=edit", ct);
         return node is JsonObject obj
@@ -52,7 +56,7 @@ public static class PageTools
     [McpServerTool(Name = "wp_create_page"),
      Description("Create a page. Content accepts HTML or block markup. Requires write mode.")]
     public static async Task<string> CreatePage(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Page title.")] string title,
         [Description("Page body (HTML or block markup).")] string content,
         [Description("Status: draft, publish, pending, private, future. Defaults to draft.")] string status = "draft",
@@ -62,8 +66,10 @@ public static class PageTools
         [Description("Optional author user id.")] int? authorId = null,
         [Description("Optional theme template file name.")] string? template = null,
         [Description("Comment status: open or closed.")] string? commentStatus = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_create_page");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         svc.EnsureWriteAllowed("wp_create_page");
 
@@ -87,7 +93,7 @@ public static class PageTools
     [McpServerTool(Name = "wp_update_page"),
      Description("Update a page's fields (PATCH semantics — only supplied fields change). Requires write mode.")]
     public static async Task<string> UpdatePage(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Page id.")] int id,
         [Description("New title.")] string? title = null,
         [Description("New body (HTML or block markup).")] string? content = null,
@@ -98,8 +104,10 @@ public static class PageTools
         [Description("New author user id.")] int? authorId = null,
         [Description("New theme template file name.")] string? template = null,
         [Description("Comment status: open or closed.")] string? commentStatus = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_update_page");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         svc.EnsureWriteAllowed("wp_update_page");
 
@@ -124,11 +132,13 @@ public static class PageTools
     [McpServerTool(Name = "wp_delete_page"),
      Description("Move a page to trash (default), or permanently delete with force=true. Permanent deletion requires Wordpress:AllowDelete=true.")]
     public static async Task<string> DeletePage(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Page id.")] int id,
         [Description("If true, bypass trash and delete permanently.")] bool force = false,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_delete_page");
         svc.EnsureFeature(svc.Options.EnableContent, "Content");
         if (force) svc.EnsureDeleteAllowed("wp_delete_page");
         else svc.EnsureWriteAllowed("wp_delete_page");

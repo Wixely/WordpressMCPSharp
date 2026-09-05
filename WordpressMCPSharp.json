@@ -1,11 +1,37 @@
 {
+  "//": "Sites are configured under Endpoints. Put real sites and credentials in WordpressMCPSharp.Local.json (gitignored), never in this checked-in file. Run wp_setup_probe with your site URL to generate the block, or wp_setup_instructions for the walkthrough.",
+  "//Endpoints-example": {
+    "site1": {
+      "RestApi": {
+        "BaseUrl": "https://example.com/",
+        "Username": "admin",
+        "ApplicationPassword": "xxxx xxxx xxxx xxxx xxxx xxxx",
+        "AllowInvalidCertificate": false
+      },
+      "Ssh": {
+        "Host": "web1.example.com",
+        "Port": 22,
+        "Username": "deploy",
+        "PrivateKeyPath": "/home/user/.ssh/id_ed25519",
+        "Path": "/var/www/example.com",
+        "WpCliPath": "wp"
+      }
+    },
+    "site2": {
+      "RestApi": {
+        "BaseUrl": "https://another.example.net/",
+        "Username": "admin",
+        "ApplicationPassword": "xxxx xxxx xxxx xxxx xxxx xxxx"
+      },
+      "ReadOnly": true
+    }
+  },
+  "Endpoints": {},
   "Wordpress": {
-    "BaseUrl": "http://localhost:8080/",
-    "Username": "",
-    "ApplicationPassword": "",
     "ReadOnly": true,
     "AllowDelete": false,
     "AllowPluginInstall": false,
+    "AllowRestPassthrough": false,
     "EnableContent": true,
     "EnableComments": true,
     "EnableUsers": true,
@@ -14,14 +40,14 @@
     "EnableThemes": true,
     "EnableSettings": true,
     "EnableMenus": true,
+    "EnableSetupDiagnostics": true,
     "DownloadDirectory": null,
     "MaxInlineContentBytes": 65536,
     "MaxInlineBinaryBytes": 2000000,
     "DefaultPageSize": 20,
     "MaxPages": 5,
     "RequestTimeoutSeconds": 100,
-    "UserAgent": "WordpressMCPSharp",
-    "AllowInvalidCertificate": false
+    "UserAgent": "WordpressMCPSharp"
   },
   "Server": {
     "Host": "localhost",

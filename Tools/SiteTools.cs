@@ -12,9 +12,11 @@ public static class SiteTools
     [McpServerTool(Name = "wp_site_info"),
      Description("Get the site's name, description, URL, WordPress timezone, and available REST namespaces. Good first call to confirm connectivity and detect plugin APIs.")]
     public static async Task<string> SiteInfo(
-        WordpressService svc,
+        EndpointRegistry registry,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_site_info");
         var node = await svc.GetJsonAsync("wp-json/", ct);
         if (node is not JsonObject d) return node?.ToJsonString(JsonOpts.Default) ?? "null";
         return JsonSerializer.Serialize(new
@@ -33,13 +35,15 @@ public static class SiteTools
     [McpServerTool(Name = "wp_search"),
      Description("Site-wide search across posts, pages, and other content types. Returns matches with type and URL.")]
     public static async Task<string> Search(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Search terms.")] string query,
         [Description("Restrict to a type: post, term, or post-format.")] string? type = null,
         [Description("Restrict to a subtype, e.g. post, page, category, post_tag, or any.")] string? subtype = null,
         [Description("Page number (1-based). Defaults to 1.")] int page = 1,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_search");
         var qs = new List<string>
         {
             $"search={Uri.EscapeDataString(query)}",
@@ -64,9 +68,11 @@ public static class SiteTools
     [McpServerTool(Name = "wp_list_post_types"),
      Description("List registered post types with their REST collection names.")]
     public static async Task<string> ListPostTypes(
-        WordpressService svc,
+        EndpointRegistry registry,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_post_types");
         var node = await svc.GetJsonAsync("wp-json/wp/v2/types?context=edit", ct);
         var items = (node as JsonObject ?? new JsonObject()).Select(kv => kv.Value is JsonObject d ? new
         {
@@ -82,9 +88,11 @@ public static class SiteTools
     [McpServerTool(Name = "wp_list_post_statuses"),
      Description("List registered post statuses (publish, draft, pending, private, future, trash, ...).")]
     public static async Task<string> ListPostStatuses(
-        WordpressService svc,
+        EndpointRegistry registry,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_post_statuses");
         var node = await svc.GetJsonAsync("wp-json/wp/v2/statuses?context=edit", ct);
         var items = (node as JsonObject ?? new JsonObject()).Select(kv => kv.Value is JsonObject d ? new
         {

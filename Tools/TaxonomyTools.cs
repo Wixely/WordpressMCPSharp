@@ -13,9 +13,11 @@ public static class TaxonomyTools
     [McpServerTool(Name = "wp_list_taxonomies"),
      Description("List registered taxonomies (category, post_tag, and any added by plugins) with their REST collection names.")]
     public static async Task<string> ListTaxonomies(
-        WordpressService svc,
+        EndpointRegistry registry,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_taxonomies");
         svc.EnsureFeature(svc.Options.EnableTaxonomies, "Taxonomy");
         var node = await svc.GetJsonAsync("wp-json/wp/v2/taxonomies?context=edit", ct);
         var items = (node as JsonObject ?? new JsonObject()).Select(kv => kv.Value is JsonObject d ? new
@@ -32,14 +34,16 @@ public static class TaxonomyTools
     [McpServerTool(Name = "wp_list_terms"),
      Description("List terms of a taxonomy (categories, tags, or a custom taxonomy's rest_base). Returns slim metadata plus pagination totals.")]
     public static async Task<string> ListTerms(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("REST collection: categories, tags, or a custom taxonomy rest_base from wp_list_taxonomies.")] string collection,
         [Description("Free-text search.")] string? search = null,
         [Description("Filter: parent term id (hierarchical taxonomies only).")] int? parentId = null,
         [Description("If true, include terms with no posts (hide_empty is off by default in the REST API; this toggles it on=false).")] bool hideEmpty = false,
         [Description("Page number (1-based). Defaults to 1.")] int page = 1,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_terms");
         svc.EnsureFeature(svc.Options.EnableTaxonomies, "Taxonomy");
         var qs = new List<string> { $"page={Math.Max(1, page)}", $"per_page={svc.Options.DefaultPageSize}" };
         if (!string.IsNullOrWhiteSpace(search)) qs.Add($"search={Uri.EscapeDataString(search)}");
@@ -64,14 +68,16 @@ public static class TaxonomyTools
     [McpServerTool(Name = "wp_create_term"),
      Description("Create a term (category, tag, or custom taxonomy term). Requires write mode.")]
     public static async Task<string> CreateTerm(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("REST collection: categories, tags, or a custom taxonomy rest_base.")] string collection,
         [Description("Term name.")] string name,
         [Description("Optional URL slug.")] string? slug = null,
         [Description("Optional description.")] string? description = null,
         [Description("Optional parent term id (hierarchical taxonomies only).")] int? parentId = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_create_term");
         svc.EnsureFeature(svc.Options.EnableTaxonomies, "Taxonomy");
         svc.EnsureWriteAllowed("wp_create_term");
 
@@ -88,15 +94,17 @@ public static class TaxonomyTools
     [McpServerTool(Name = "wp_update_term"),
      Description("Update a term's name, slug, description, or parent. Requires write mode.")]
     public static async Task<string> UpdateTerm(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("REST collection: categories, tags, or a custom taxonomy rest_base.")] string collection,
         [Description("Term id.")] int id,
         [Description("New name.")] string? name = null,
         [Description("New slug.")] string? slug = null,
         [Description("New description.")] string? description = null,
         [Description("New parent term id (hierarchical taxonomies only).")] int? parentId = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_update_term");
         svc.EnsureFeature(svc.Options.EnableTaxonomies, "Taxonomy");
         svc.EnsureWriteAllowed("wp_update_term");
 
@@ -117,11 +125,13 @@ public static class TaxonomyTools
     [McpServerTool(Name = "wp_delete_term"),
      Description("Permanently delete a term (terms do not support trash). Requires Wordpress:AllowDelete=true.")]
     public static async Task<string> DeleteTerm(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("REST collection: categories, tags, or a custom taxonomy rest_base.")] string collection,
         [Description("Term id.")] int id,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_delete_term");
         svc.EnsureFeature(svc.Options.EnableTaxonomies, "Taxonomy");
         svc.EnsureDeleteAllowed("wp_delete_term");
         await svc.SendJsonAsync(HttpMethod.Delete, $"wp-json/wp/v2/{ValidateCollection(collection)}/{id}?force=true", null, ct);

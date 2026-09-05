@@ -13,9 +13,11 @@ public static class MenuTools
     [McpServerTool(Name = "wp_list_menus"),
      Description("List classic navigation menus and their assigned theme locations.")]
     public static async Task<string> ListMenus(
-        WordpressService svc,
+        EndpointRegistry registry,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_menus");
         svc.EnsureFeature(svc.Options.EnableMenus, "Menu");
         var node = await svc.ListAllAsync("wp-json/wp/v2/menus?context=edit", ct);
         var items = node.Select(m => m is JsonObject d ? new
@@ -31,11 +33,13 @@ public static class MenuTools
     [McpServerTool(Name = "wp_create_menu"),
      Description("Create a classic navigation menu, optionally assigning theme locations. Requires write mode.")]
     public static async Task<string> CreateMenu(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Menu name.")] string name,
         [Description("Optional theme location slugs as JSON array, e.g. `[\"primary\"]` (see wp_list_menu_locations).")] string? locationsJson = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_create_menu");
         svc.EnsureFeature(svc.Options.EnableMenus, "Menu");
         svc.EnsureWriteAllowed("wp_create_menu");
 
@@ -55,10 +59,12 @@ public static class MenuTools
     [McpServerTool(Name = "wp_delete_menu"),
      Description("Permanently delete a navigation menu and its items. Requires Wordpress:AllowDelete=true.")]
     public static async Task<string> DeleteMenu(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Menu id.")] int id,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_delete_menu");
         svc.EnsureFeature(svc.Options.EnableMenus, "Menu");
         svc.EnsureDeleteAllowed("wp_delete_menu");
         await svc.SendJsonAsync(HttpMethod.Delete, $"wp-json/wp/v2/menus/{id}?force=true", null, ct);
@@ -68,10 +74,12 @@ public static class MenuTools
     [McpServerTool(Name = "wp_list_menu_items"),
      Description("List the items of a navigation menu in order.")]
     public static async Task<string> ListMenuItems(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Menu id.")] int menuId,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_menu_items");
         svc.EnsureFeature(svc.Options.EnableMenus, "Menu");
         var node = await svc.ListAllAsync($"wp-json/wp/v2/menu-items?menus={menuId}&context=edit&orderby=menu_order&order=asc", ct);
         var items = node.Select(m => m is JsonObject d ? new
@@ -92,7 +100,7 @@ public static class MenuTools
     [McpServerTool(Name = "wp_create_menu_item"),
      Description("Add an item to a navigation menu — a custom link, or a link to a post/page/category/tag. Requires write mode.")]
     public static async Task<string> CreateMenuItem(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Menu id to add the item to.")] int menuId,
         [Description("Item label.")] string title,
         [Description("Custom link URL (for type=custom). Omit when linking site content.")] string? url = null,
@@ -101,8 +109,10 @@ public static class MenuTools
         [Description("Optional parent menu item id for a submenu.")] int? parentItemId = null,
         [Description("Optional position within the menu (1-based).")] int? menuOrder = null,
         [Description("Optional link target, e.g. `_blank`.")] string? target = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_create_menu_item");
         svc.EnsureFeature(svc.Options.EnableMenus, "Menu");
         svc.EnsureWriteAllowed("wp_create_menu_item");
 
@@ -137,15 +147,17 @@ public static class MenuTools
     [McpServerTool(Name = "wp_update_menu_item"),
      Description("Update a menu item's label, URL, order, or parent. Requires write mode.")]
     public static async Task<string> UpdateMenuItem(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Menu item id.")] int id,
         [Description("New label.")] string? title = null,
         [Description("New URL (custom links only).")] string? url = null,
         [Description("New parent menu item id (0 for top level).")] int? parentItemId = null,
         [Description("New position within the menu (1-based).")] int? menuOrder = null,
         [Description("New link target.")] string? target = null,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_update_menu_item");
         svc.EnsureFeature(svc.Options.EnableMenus, "Menu");
         svc.EnsureWriteAllowed("wp_update_menu_item");
 
@@ -167,10 +179,12 @@ public static class MenuTools
     [McpServerTool(Name = "wp_delete_menu_item"),
      Description("Permanently delete a menu item. Requires Wordpress:AllowDelete=true.")]
     public static async Task<string> DeleteMenuItem(
-        WordpressService svc,
+        EndpointRegistry registry,
         [Description("Menu item id.")] int id,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_delete_menu_item");
         svc.EnsureFeature(svc.Options.EnableMenus, "Menu");
         svc.EnsureDeleteAllowed("wp_delete_menu_item");
         await svc.SendJsonAsync(HttpMethod.Delete, $"wp-json/wp/v2/menu-items/{id}?force=true", null, ct);
@@ -180,9 +194,11 @@ public static class MenuTools
     [McpServerTool(Name = "wp_list_menu_locations"),
      Description("List the theme's registered menu locations and which menu is assigned to each.")]
     public static async Task<string> ListMenuLocations(
-        WordpressService svc,
+        EndpointRegistry registry,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        var svc = registry.RequireRest(site, "wp_list_menu_locations");
         svc.EnsureFeature(svc.Options.EnableMenus, "Menu");
         var node = await svc.GetJsonAsync("wp-json/wp/v2/menu-locations", ct);
         var items = (node as JsonObject ?? new JsonObject()).Select(kv => kv.Value is JsonObject d ? new

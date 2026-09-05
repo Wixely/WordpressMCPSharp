@@ -10,5 +10,7 @@ internal static class JsonOpts
         WriteIndented = false,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
+        // Keeps typed results (diagnostics) consistent with the anonymous objects the tools return.
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 }

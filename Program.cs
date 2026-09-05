@@ -68,8 +68,11 @@ public static class Program
                 builder.Configuration.GetSection(WordpressOptions.SectionName));
             builder.Services.Configure<ServerOptions>(
                 builder.Configuration.GetSection(ServerOptions.SectionName));
+            // Endpoints and DefaultSite live at the configuration root.
+            builder.Services.Configure<RegistryOptions>(builder.Configuration);
 
-            builder.Services.AddSingleton<WordpressService>();
+            builder.Services.AddSingleton<EndpointRegistry>();
+            builder.Services.AddSingleton<SetupDiagnosticsService>();
 
             builder.Services
                 .AddMcpServer()
@@ -105,17 +108,31 @@ public static class Program
                 e.SetObserved();
             };
 
-            var wordpress = app.Services.GetRequiredService<WordpressService>();
+            var registry = app.Services.GetRequiredService<EndpointRegistry>();
+            var wordpress = registry.Options;
+
+            var details = new List<string>
+            {
+                $"Read-only: {wordpress.ReadOnly}",
+                $"Allow delete: {wordpress.AllowDelete}",
+                $"Allow plugin install: {wordpress.AllowPluginInstall}",
+                $"Endpoints: {registry.Count}{(registry.LegacyMapped ? " (from legacy Wordpress:BaseUrl)" : string.Empty)}",
+            };
+            details.AddRange(registry.All.Select(entry =>
+                $"  {entry.Name}: rest={(entry.Endpoint.HasRest ? entry.Endpoint.EffectiveUrl : "none")}, management={entry.Endpoint.ManagementMode}"));
+
             LogStartup(
                 "WordpressMCPSharp",
                 $"http://{server.Host}:{server.Port}{server.Path}",
                 "HTTP",
                 isService ? "WindowsService" : "Console",
                 contentRoot,
-                $"Read-only: {wordpress.IsReadOnly}",
-                $"Allow delete: {wordpress.Options.AllowDelete}",
-                $"Allow plugin install: {wordpress.Options.AllowPluginInstall}",
-                $"WordPress base: {wordpress.Options.BaseUrl}");
+                details.ToArray());
+
+            foreach (var warning in registry.ConfigurationWarnings)
+            {
+                Log.ForContext("SourceContext", "WordpressMCPSharp.Startup").Warning("Configuration: {Warning}", warning);
+            }
 
             app.UseMiddleware<McpPasswordMiddleware>();
 
@@ -125,8 +142,15 @@ public static class Program
                 status = "ok",
                 server = "WordpressMCPSharp",
                 path = server.Path,
-                readOnly = wordpress.IsReadOnly,
-                allowDelete = wordpress.Options.AllowDelete,
+                readOnly = wordpress.ReadOnly,
+                allowDelete = wordpress.AllowDelete,
+                endpoints = registry.All.Select(entry => new
+                {
+                    name = entry.Name,
+                    rest = entry.Endpoint.HasRest,
+                    management = entry.Endpoint.ManagementMode,
+                }),
+                configurationWarnings = registry.ConfigurationWarnings.Count,
                 timeUtc = DateTimeOffset.UtcNow,
             });
             app.MapMcp(server.Path);
