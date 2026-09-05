@@ -1,0 +1,64 @@
+{
+  "Wordpress": {
+    "BaseUrl": "http://localhost:8080/",
+    "Username": "",
+    "ApplicationPassword": "",
+    "ReadOnly": true,
+    "AllowDelete": false,
+    "AllowPluginInstall": false,
+    "EnableContent": true,
+    "EnableComments": true,
+    "EnableUsers": true,
+    "EnableTaxonomies": true,
+    "EnablePlugins": true,
+    "EnableThemes": true,
+    "EnableSettings": true,
+    "EnableMenus": true,
+    "DownloadDirectory": null,
+    "MaxInlineContentBytes": 65536,
+    "MaxInlineBinaryBytes": 2000000,
+    "DefaultPageSize": 20,
+    "MaxPages": 5,
+    "RequestTimeoutSeconds": 100,
+    "UserAgent": "WordpressMCPSharp",
+    "AllowInvalidCertificate": false
+  },
+  "Server": {
+    "Host": "localhost",
+    "Port": 5720,
+    "Path": "/mcp",
+    "WindowsServiceName": "WordpressMCPSharp",
+    "Password": ""
+  },
+  "Serilog": {
+    "MinimumLevel": {
+      "Default": "Information",
+      "Override": {
+        "Microsoft": "Warning",
+        "Microsoft.Hosting.Lifetime": "Information",
+        "System": "Warning"
+      }
+    },
+    "WriteTo": [
+      {
+        "Name": "Console",
+        "Args": {
+          "outputTemplate": "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}"
+        }
+      },
+      {
+        "Name": "File",
+        "Args": {
+          "path": "logs/wordpressmcp-.log",
+          "rollingInterval": "Day",
+          "retainedFileCountLimit": 14,
+          "fileSizeLimitBytes": 52428800,
+          "rollOnFileSizeLimit": true,
+          "shared": true,
+          "outputTemplate": "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}"
+        }
+      }
+    ],
+    "Enrich": [ "FromLogContext", "WithMachineName", "WithProcessId", "WithThreadId" ]
+  }
+}
