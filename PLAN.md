@@ -203,10 +203,12 @@ finding with the fix.
 
 ## Plan
 
-### Phase 1 — Endpoint registry + channel independence (restructure)
+### Phase 1 — Endpoint registry + channel independence (restructure) — **DONE**
 
-Do this first: it touches all 60 existing tools, so it must land before more tools pile
-onto the flat config.
+Shipped in `83cf4c1`. 64 tools; verified on the WSL rig with a 30/30 tool regression plus
+the endpoint/channel matrix (empty registry, legacy mapping, resolution order,
+unknown-site and channel errors, per-endpoint lockdown) and the probe cases
+(no/wrong credentials, non-WordPress URL, unreachable host).
 
 1. `EndpointRegistry` service: parses `Endpoints`, validates blocks, maps legacy flat
    config to `default`, caches one `WordpressRestClient` (today's `WordpressService`,
