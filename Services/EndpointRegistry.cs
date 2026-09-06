@@ -15,7 +15,9 @@ public sealed class EndpointRegistry : IDisposable
     private readonly Dictionary<string, EndpointOptions> _endpoints;
     private readonly WordpressOptions _options;
     private readonly string? _defaultSite;
-    private readonly ConcurrentDictionary<string, WordpressRestClient> _restClients = new(StringComparer.OrdinalIgnoreCase);
+    // Lazy values so two concurrent first-calls for the same endpoint cannot each build a client and
+    // silently leak the loser's HttpClient.
+    private readonly ConcurrentDictionary<string, Lazy<WordpressRestClient>> _restClients = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
     public EndpointRegistry(IOptions<RegistryOptions> registry, IOptions<WordpressOptions> options)
@@ -115,11 +117,9 @@ public sealed class EndpointRegistry : IDisposable
                 "Run wp_setup_probe with the site URL to work out the right values.");
         }
 
-        return _restClients.GetOrAdd(name, key => new WordpressRestClient(
-            key,
-            endpoint.RestApi!,
-            _options,
-            EffectiveSafety.From(_options, endpoint)));
+        return _restClients.GetOrAdd(name, key => new Lazy<WordpressRestClient>(
+            () => new WordpressRestClient(key, endpoint.RestApi!, _options, EffectiveSafety.From(_options, endpoint)),
+            LazyThreadSafetyMode.ExecutionAndPublication)).Value;
     }
 
     /// <summary>Resolve a site that must have a management channel. Used by CLI-backed tools.</summary>
@@ -245,7 +245,7 @@ public sealed class EndpointRegistry : IDisposable
         _disposed = true;
         foreach (var client in _restClients.Values)
         {
-            client.Dispose();
+            if (client.IsValueCreated) client.Value.Dispose();
         }
         _restClients.Clear();
     }

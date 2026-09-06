@@ -235,10 +235,26 @@ public static class ProvisioningTools
         if (arguments.Count == 0)
             throw new McpException("wp_cli: argumentsJson must contain at least one argument, e.g. [\"plugin\",\"list\"].");
 
+        // WP-CLI accepts global flags before the subcommand, so checking argv[0] alone would let
+        // ["--skip-plugins","eval",…] straight past the deny-list.
+        var subcommand = arguments.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
+        if (subcommand is null)
+            throw new McpException("wp_cli: argumentsJson must include a WP-CLI subcommand, not only flags.");
+
         var denied = management.Options.DeniedCliCommands ?? new List<string>();
-        if (denied.Any(d => string.Equals(d, arguments[0], StringComparison.OrdinalIgnoreCase)))
+        if (denied.Any(d => string.Equals(d, subcommand, StringComparison.OrdinalIgnoreCase)))
             throw new McpException(
-                $"wp_cli: the '{arguments[0]}' command is on the deny-list (Management:DeniedCliCommands) because it executes arbitrary PHP or opens a shell.");
+                $"wp_cli: the '{subcommand}' command is on the deny-list (Management:DeniedCliCommands) because it executes arbitrary PHP or opens a shell.");
+
+        // These global flags load caller-chosen PHP before the subcommand runs, which would defeat the
+        // deny-list entirely.
+        var forbiddenFlags = new[] { "--require", "--exec" };
+        var badFlag = arguments.FirstOrDefault(a =>
+            forbiddenFlags.Any(f => a.StartsWith(f + "=", StringComparison.OrdinalIgnoreCase)
+                                    || string.Equals(a, f, StringComparison.OrdinalIgnoreCase)));
+        if (badFlag is not null)
+            throw new McpException(
+                $"wp_cli: the '{badFlag}' global flag is not allowed because it executes arbitrary PHP, which would bypass Management:DeniedCliCommands.");
 
         var result = await management.RunAsync(target, arguments, ct, longRunning);
         return JsonSerializer.Serialize(new
@@ -254,15 +270,21 @@ public static class ProvisioningTools
 
     private static List<string> ParseArguments(string json)
     {
+        List<string?>? parsed;
         try
         {
-            var parsed = JsonSerializer.Deserialize<List<string>>(json);
-            return parsed ?? new List<string>();
+            parsed = JsonSerializer.Deserialize<List<string?>>(json);
         }
         catch (JsonException ex)
         {
             throw new McpException($"argumentsJson must be a JSON array of strings: {ex.Message}");
         }
+
+        if (parsed is null) return new List<string>();
+        if (parsed.Any(a => a is null))
+            throw new McpException("argumentsJson must not contain null entries.");
+
+        return parsed.Select(a => a!).ToList();
     }
 
     /// <summary>wp-config values come back as strings, booleans or numbers; render any of them as text.</summary>

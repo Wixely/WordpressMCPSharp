@@ -346,6 +346,16 @@ public sealed class SetupDiagnosticsService
         var plain = pretty.Node is null ? await TryFetchJsonAsync(http, root + "index.php?rest_route=/", ct) : default;
 
         var node = pretty.Node ?? plain.Node;
+
+        // A URL that answers with a bare JSON array is valid JSON but not the WordPress API; indexing it
+        // as an object would throw instead of reporting "this isn't WordPress".
+        if (node is not null and not JsonObject)
+        {
+            result.Findings.Add(new Finding("wordpress", "fail",
+                "The URL returned JSON, but not a WordPress API response.",
+                "Check the URL points at a WordPress site root."));
+            return false;
+        }
         if (node is null)
         {
             var status = pretty.Status ?? plain.Status;
@@ -400,10 +410,19 @@ public sealed class SetupDiagnosticsService
         var declared = node["url"]?.GetValue<string?>();
         if (!string.IsNullOrWhiteSpace(declared) && !UrlsEquivalent(declared!, root))
         {
-            result.Findings.Add(new Finding("site-url", "warn",
-                $"WordPress reports its address as {declared}, but was probed at {root.TrimEnd('/')}.",
-                $"Use {SiteRoot(new Uri(declared!))} as BaseUrl — requests to the other address get redirected and lose authentication."));
-            result.FinalUrl = SiteRoot(new Uri(declared!));
+            if (Uri.TryCreate(declared, UriKind.Absolute, out var declaredUri))
+            {
+                result.Findings.Add(new Finding("site-url", "warn",
+                    $"WordPress reports its address as {declared}, but was probed at {root.TrimEnd('/')}.",
+                    $"Use {SiteRoot(declaredUri)} as BaseUrl — requests to the other address get redirected and lose authentication."));
+                result.FinalUrl = SiteRoot(declaredUri);
+            }
+            else
+            {
+                result.Findings.Add(new Finding("site-url", "warn",
+                    $"WordPress reports its address as '{declared}', which is not a valid absolute URL.",
+                    "Fix the site's WordPress Address (siteurl) setting; REST calls are unreliable until it is correct."));
+            }
         }
 
         if (result.Namespaces.Contains("wc/v3"))

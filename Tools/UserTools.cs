@@ -63,6 +63,7 @@ public static class UserTools
         CancellationToken ct = default)
     {
         var svc = registry.RequireRest(site, "wp_get_me");
+        svc.EnsureFeature(svc.Options.EnableUsers, "User");
         var node = await svc.GetJsonAsync("wp-json/wp/v2/users/me?context=edit", ct);
         if (node is JsonObject obj) obj.Remove("_links");
         return node?.ToJsonString(JsonOpts.Default) ?? "null";

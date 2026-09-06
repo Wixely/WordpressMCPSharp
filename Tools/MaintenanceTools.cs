@@ -112,6 +112,7 @@ public static class MaintenanceTools
         CancellationToken ct = default)
     {
         var target = await management.ResolveForWriteAsync(site, "wp_update_plugin", ct);
+        management.RequireFeature(target, f => f.EnablePlugins, "Plugin");
 
         if (!all && string.IsNullOrWhiteSpace(plugin))
             throw new McpException("wp_update_plugin: supply a plugin slug, or set all=true.");
@@ -143,6 +144,7 @@ public static class MaintenanceTools
         CancellationToken ct = default)
     {
         var target = await management.ResolveForWriteAsync(site, "wp_update_theme", ct);
+        management.RequireFeature(target, f => f.EnableThemes, "Theme");
 
         if (!all && string.IsNullOrWhiteSpace(theme))
             throw new McpException("wp_update_theme: supply a theme slug, or set all=true.");
@@ -173,6 +175,7 @@ public static class MaintenanceTools
         CancellationToken ct = default)
     {
         var target = await management.ResolveForWriteAsync(site, "wp_install_theme", ct);
+        management.RequireFeature(target, f => f.EnableThemes, "Theme");
 
         var args = new List<string> { "theme", "install", slug };
         if (activate) args.Add("--activate");
@@ -196,6 +199,7 @@ public static class MaintenanceTools
         CancellationToken ct = default)
     {
         var target = await management.ResolveForWriteAsync(site, "wp_activate_theme", ct);
+        management.RequireFeature(target, f => f.EnableThemes, "Theme");
         var before = await management.RunAsync(target, new[] { "theme", "list", "--status=active", "--field=name" }, ct);
         var result = await management.RunOrThrowAsync(target, new[] { "theme", "activate", theme }, "wp_activate_theme", ct);
 
@@ -217,6 +221,7 @@ public static class MaintenanceTools
         CancellationToken ct = default)
     {
         var target = await management.ResolveForWriteAsync(site, "wp_set_permalink_structure", ct);
+        management.RequireFeature(target, f => f.EnableSettings, "Settings");
         var before = await management.RunAsync(target, new[] { "option", "get", "permalink_structure" }, ct);
         await management.RunOrThrowAsync(target, new[] { "rewrite", "structure", structure, "--hard" }, "wp_set_permalink_structure", ct);
         var after = await management.RunAsync(target, new[] { "option", "get", "permalink_structure" }, ct);

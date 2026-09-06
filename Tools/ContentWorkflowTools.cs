@@ -221,6 +221,146 @@ public static class ContentWorkflowTools
         }, JsonOpts.Default);
     }
 
+    [McpServerTool(Name = "wp_restore_revision"),
+     Description("Roll a post or page back to one of its earlier revisions — the answer to \"put back yesterday's version\". Use wp_list_post_revisions to find the revision id. The current version is kept as a new revision, so the rollback itself can be undone. Requires write mode.")]
+    public static async Task<string> RestoreRevision(
+        EndpointRegistry registry,
+        [Description("Post or page id to roll back.")] int id,
+        [Description("Revision id to restore, from wp_list_post_revisions.")] int revisionId,
+        [Description("Content type of the id: post or page. Defaults to post.")] string type = "post",
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
+        CancellationToken ct = default)
+    {
+        var svc = registry.RequireRest(site, "wp_restore_revision");
+        svc.EnsureFeature(svc.Options.EnableContent, "Content");
+        svc.EnsureWriteAllowed("wp_restore_revision");
+
+        var collection = ResolveCollection(type);
+        var revision = await svc.GetJsonAsync($"wp-json/wp/v2/{collection}/{id}/revisions/{revisionId}", ct) as JsonObject
+            ?? throw new McpException($"Revision {revisionId} was not found on {type} {id}.");
+
+        // Confirm the revision really belongs to this post before overwriting anything.
+        var parent = revision["parent"]?.GetValue<int?>();
+        if (parent.HasValue && parent.Value != id)
+        {
+            throw new McpException(
+                $"wp_restore_revision refused: revision {revisionId} belongs to post {parent.Value}, not {id}.");
+        }
+
+        var body = new JsonObject
+        {
+            ["content"] = (revision["content"] as JsonObject)?["raw"]?.GetValue<string?>()
+                ?? WpUtil.Rendered(revision["content"]) ?? string.Empty,
+            ["title"] = (revision["title"] as JsonObject)?["raw"]?.GetValue<string?>()
+                ?? WpUtil.Rendered(revision["title"]) ?? string.Empty,
+        };
+        var excerpt = (revision["excerpt"] as JsonObject)?["raw"]?.GetValue<string?>();
+        if (excerpt is not null) body["excerpt"] = excerpt;
+
+        var result = await svc.SendJsonAsync(HttpMethod.Post, $"wp-json/wp/v2/{collection}/{id}", body, ct);
+
+        return JsonSerializer.Serialize(new
+        {
+            id,
+            type,
+            restoredRevision = revisionId,
+            revisionDate = revision["date"]?.GetValue<string?>(),
+            title = WpUtil.Rendered(result?["title"]),
+            modified = result?["modified"]?.GetValue<string?>(),
+            note = "The version replaced was saved as a new revision, so this can be rolled back again.",
+        }, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "wp_list_trash"),
+     Description("List trashed posts and pages, so deleted content can be found and restored before it is purged.")]
+    public static async Task<string> ListTrash(
+        EndpointRegistry registry,
+        [Description("Content type: post, page, or both (default).")] string type = "both",
+        [Description("Page number (1-based). Defaults to 1.")] int page = 1,
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
+        CancellationToken ct = default)
+    {
+        var svc = registry.RequireRest(site, "wp_list_trash");
+        svc.EnsureFeature(svc.Options.EnableContent, "Content");
+
+        var collections = type.ToLowerInvariant() switch
+        {
+            "both" or "all" => new[] { "posts", "pages" },
+            _ => new[] { ResolveCollection(type) },
+        };
+
+        var items = new List<object>();
+        foreach (var collection in collections)
+        {
+            var (node, _, _) = await svc.GetJsonPagedAsync(
+                $"wp-json/wp/v2/{collection}?status=trash&context=edit&page={Math.Max(1, page)}&per_page={svc.Options.DefaultPageSize}", ct);
+
+            foreach (var entry in (node as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+            {
+                items.Add(new
+                {
+                    id = entry["id"]?.GetValue<int?>(),
+                    type = entry["type"]?.GetValue<string?>(),
+                    title = WpUtil.Rendered(entry["title"]),
+                    modified = entry["modified"]?.GetValue<string?>(),
+                    slug = entry["slug"]?.GetValue<string?>(),
+                });
+            }
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            count = items.Count,
+            items,
+            hint = items.Count > 0 ? "Restore one with wp_untrash_post." : null,
+        }, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "wp_untrash_post"),
+     Description("Restore a trashed post or page. It comes back as a draft by default so it is not republished unexpectedly. Requires write mode.")]
+    public static async Task<string> UntrashPost(
+        EndpointRegistry registry,
+        [Description("Id of the trashed post or page.")] int id,
+        [Description("Content type of the id: post or page. Defaults to post.")] string type = "post",
+        [Description("Status to restore to: draft (default), publish, pending, private.")] string status = "draft",
+        [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
+        CancellationToken ct = default)
+    {
+        var svc = registry.RequireRest(site, "wp_untrash_post");
+        svc.EnsureFeature(svc.Options.EnableContent, "Content");
+        svc.EnsureWriteAllowed("wp_untrash_post");
+
+        var collection = ResolveCollection(type);
+        var current = await svc.GetJsonAsync($"wp-json/wp/v2/{collection}/{id}?context=edit", ct) as JsonObject
+            ?? throw new McpException($"{type} {id} was not found.");
+
+        var currentStatus = current["status"]?.GetValue<string?>();
+        if (!string.Equals(currentStatus, "trash", StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                id,
+                type,
+                restored = false,
+                currentStatus,
+                message = $"{type} {id} is not in the trash (status is '{currentStatus}'); nothing to restore.",
+            }, JsonOpts.Default);
+        }
+
+        var result = await svc.SendJsonAsync(
+            HttpMethod.Post, $"wp-json/wp/v2/{collection}/{id}", new JsonObject { ["status"] = status }, ct);
+
+        return JsonSerializer.Serialize(new
+        {
+            id,
+            type,
+            restored = true,
+            status = result?["status"]?.GetValue<string?>(),
+            title = WpUtil.Rendered(result?["title"]),
+            link = result?["link"]?.GetValue<string?>(),
+        }, JsonOpts.Default);
+    }
+
     private static int CountOccurrences(string haystack, string needle, StringComparison comparison)
     {
         var count = 0;

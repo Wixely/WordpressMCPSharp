@@ -18,9 +18,10 @@ public static class ManagementSetupTools
     private const string DefaultSearchRoots = "/var/www /srv/www /home /usr/share/nginx";
 
     [McpServerTool(Name = "wp_setup_probe_ssh"),
-     Description("Check an SSH host for WordPress management and discover the sites on it. Verifies the connection, whether WP-CLI is installed, and searches common web roots for wp-config.php — reporting each install's path, WordPress version and site URL. Use this to configure endpoints on a host serving several sites, so each path is verified rather than guessed. Takes connection details as parameters, so it works before any endpoint exists.")]
+     Description("Check an SSH host for WordPress management and discover the sites on it. Verifies the connection, whether WP-CLI is installed, and searches common web roots for wp-config.php — reporting each install's path, WordPress version and site URL. Use this to configure endpoints on a host serving several sites, so each path is verified rather than guessed. Takes connection details as parameters so it works before any endpoint exists, and requires Management:AllowCliManagement=true because it uses the WP-CLI channel.")]
     public static async Task<string> SetupProbeSsh(
         EndpointRegistry registry,
+        ManagementService management,
         [Description("SSH host name or IP.")] string host,
         [Description("SSH username.")] string username,
         [Description("Path to a private key file on this server. Supply this or password.")] string? privateKeyPath = null,
@@ -32,6 +33,8 @@ public static class ManagementSetupTools
         CancellationToken ct = default)
     {
         registry.Options.EnsureSetupDiagnosticsEnabled();
+        // This runs commands over SSH, so it sits behind the same master gate as every other CLI tool.
+        management.EnsureCliEnabled("wp_setup_probe_ssh");
 
         var probeEndpoint = new EndpointOptions
         {
@@ -46,17 +49,14 @@ public static class ManagementSetupTools
                 WpCliPath = wpCliPath,
             },
         };
-        var target = new ManagementService.Target("probe", probeEndpoint, registry.SafetyFor(probeEndpoint));
 
         var findings = new List<object>();
-        var probe = new ManagementService(registry, Microsoft.Extensions.Options.Options.Create(
-            new ManagementOptions { AllowCliManagement = true, CommandTimeoutSeconds = 60, LongCommandTimeoutSeconds = 120 }));
 
         // 1. Connectivity.
         ManagementService.CliResult whoami;
         try
         {
-            whoami = await probe.RunShellAsync(target, "whoami && uname -sr", ct, longRunning: false);
+            whoami = await management.RunProbeShellAsync(probeEndpoint, "whoami && uname -sr", "wp_setup_probe_ssh", ct);
         }
         catch (McpException ex)
         {
@@ -75,7 +75,8 @@ public static class ManagementSetupTools
         findings.Add(new { check = "ssh", status = "ok", detail = $"Connected as {whoami.Output.Replace('\n', ' ').Trim()}.", fix = (string?)null });
 
         // 2. WP-CLI availability.
-        var wpVersion = await probe.RunShellAsync(target, $"{ManagementService.ShellQuote(wpCliPath)} --version 2>&1 || echo MISSING", ct, longRunning: false);
+        var wpVersion = await management.RunProbeShellAsync(
+            probeEndpoint, $"{ManagementService.ShellQuote(wpCliPath)} --version 2>&1 || echo MISSING", "wp_setup_probe_ssh", ct);
         var hasWpCli = !wpVersion.Output.Contains("MISSING", StringComparison.OrdinalIgnoreCase)
                        && wpVersion.Output.Contains("WP-CLI", StringComparison.OrdinalIgnoreCase);
         findings.Add(new
@@ -86,13 +87,18 @@ public static class ManagementSetupTools
             fix = hasWpCli ? null : "Install WP-CLI on the host (https://wp-cli.org/#installing), or set the endpoint's WpCliPath to its full path.",
         });
 
-        // 3. Discover installs.
+        // 3. Discover installs. Every caller-supplied value is quoted before it reaches the shell —
+        // these come from the MCP client, not from configuration.
         var roots = string.IsNullOrWhiteSpace(searchRoots) ? DefaultSearchRoots : searchRoots!;
+        var quotedRoots = string.Join(' ', roots
+            .Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(ManagementService.ShellQuote));
+
         var searchCommand = path is not null
             ? $"test -f {ManagementService.ShellQuote(path.TrimEnd('/') + "/wp-config.php")} && echo {ManagementService.ShellQuote(path.TrimEnd('/'))}"
-            : $"find {roots} -maxdepth 4 -name wp-config.php -not -path '*/wp-content/*' 2>/dev/null | head -50 | xargs -r -n1 dirname";
+            : $"find {quotedRoots} -maxdepth 4 -name wp-config.php -not -path '*/wp-content/*' 2>/dev/null | head -50 | xargs -r -n1 dirname";
 
-        var found = await probe.RunShellAsync(target, searchCommand + " || true", ct);
+        var found = await management.RunProbeShellAsync(probeEndpoint, searchCommand + " || true", "wp_setup_probe_ssh", ct);
         var installPaths = found.StdOut
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(p => p.Trim())
@@ -116,7 +122,7 @@ public static class ManagementSetupTools
 
         foreach (var installPath in installPaths)
         {
-            var siteTarget = new ManagementService.Target("probe", new EndpointOptions
+            var siteEndpoint = new EndpointOptions
             {
                 Ssh = new SshManagementOptions
                 {
@@ -124,14 +130,14 @@ public static class ManagementSetupTools
                     PrivateKeyPath = privateKeyPath, Password = password,
                     Path = installPath, WpCliPath = wpCliPath,
                 },
-            }, target.Safety);
+            };
 
             string? siteUrl = null, version = null, title = null;
             if (hasWpCli)
             {
-                siteUrl = (await probe.RunAsync(siteTarget, new[] { "option", "get", "siteurl" }, ct)).Output;
-                version = (await probe.RunAsync(siteTarget, new[] { "core", "version" }, ct)).Output;
-                title = (await probe.RunAsync(siteTarget, new[] { "option", "get", "blogname" }, ct)).Output;
+                siteUrl = (await management.RunProbeAsync(siteEndpoint, new[] { "option", "get", "siteurl" }, "wp_setup_probe_ssh", ct)).Output;
+                version = (await management.RunProbeAsync(siteEndpoint, new[] { "core", "version" }, "wp_setup_probe_ssh", ct)).Output;
+                title = (await management.RunProbeAsync(siteEndpoint, new[] { "option", "get", "blogname" }, "wp_setup_probe_ssh", ct)).Output;
             }
 
             var name = SuggestName(siteUrl, installPath);

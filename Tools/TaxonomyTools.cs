@@ -38,7 +38,7 @@ public static class TaxonomyTools
         [Description("REST collection: categories, tags, or a custom taxonomy rest_base from wp_list_taxonomies.")] string collection,
         [Description("Free-text search.")] string? search = null,
         [Description("Filter: parent term id (hierarchical taxonomies only).")] int? parentId = null,
-        [Description("If true, include terms with no posts (hide_empty is off by default in the REST API; this toggles it on=false).")] bool hideEmpty = false,
+        [Description("If true, exclude terms that have no posts assigned. Defaults to false, which returns empty terms as well.")] bool hideEmpty = false,
         [Description("Page number (1-based). Defaults to 1.")] int page = 1,
         [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)

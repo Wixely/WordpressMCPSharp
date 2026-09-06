@@ -130,6 +130,7 @@ public static class Program
                 $"CLI management: {(managementOptions.AllowCliManagement ? "enabled" : "disabled")}" +
                     (managementOptions.AllowCliManagement && managementOptions.AllowArbitraryCli ? " (arbitrary commands allowed)" : string.Empty),
                 $"Snapshot restore: {(snapshotOptions.AllowRestore ? "allowed" : "blocked")}",
+                $"Disabled categories: {DescribeDisabledFeatures(wordpress)}",
                 $"Endpoints: {registry.Count}{(registry.LegacyMapped ? " (from legacy Wordpress:BaseUrl)" : string.Empty)}",
             };
             details.AddRange(registry.All.Select(entry =>
@@ -183,6 +184,24 @@ public static class Program
         {
             Log.CloseAndFlush();
         }
+    }
+
+    /// <summary>List the tool categories an operator has switched off, so the posture is visible at startup.</summary>
+    private static string DescribeDisabledFeatures(WordpressOptions options)
+    {
+        var disabled = new List<string>();
+        if (!options.EnableContent) disabled.Add("content");
+        if (!options.EnableComments) disabled.Add("comments");
+        if (!options.EnableUsers) disabled.Add("users");
+        if (!options.EnableTaxonomies) disabled.Add("taxonomies");
+        if (!options.EnablePlugins) disabled.Add("plugins");
+        if (!options.EnableThemes) disabled.Add("themes");
+        if (!options.EnableSettings) disabled.Add("settings");
+        if (!options.EnableMenus) disabled.Add("menus");
+        if (!options.EnableWooCommerce) disabled.Add("woocommerce");
+        if (!options.EnableSiteHealth) disabled.Add("site-health");
+        if (!options.EnableSetupDiagnostics) disabled.Add("setup-diagnostics");
+        return disabled.Count == 0 ? "(none)" : string.Join(", ", disabled);
     }
 
     private static void LogStartup(string serviceName, string endpoint, string transport, string mode, string contentRoot, params string[] details)

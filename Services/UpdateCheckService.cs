@@ -12,8 +12,10 @@ namespace WordpressMCPSharp.Services;
 public sealed class UpdateCheckService : IDisposable
 {
     private readonly HttpClient _http;
-    private readonly Dictionary<string, string?> _pluginVersionCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string?> _themeVersionCache = new(StringComparer.OrdinalIgnoreCase);
+    // Registered as a singleton and reached from concurrent tool calls, so these must be concurrent
+    // collections — parallel writes to a plain Dictionary can corrupt it and hang the call.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string?> _pluginVersionCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string?> _themeVersionCache = new(StringComparer.OrdinalIgnoreCase);
     private string? _latestCore;
     private bool _disposed;
 

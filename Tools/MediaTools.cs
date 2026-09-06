@@ -169,13 +169,21 @@ public static class MediaTools
             ?? throw new McpException($"Media {id} has no source_url.");
 
         var (bytes, contentType, _) = await svc.DownloadBytesAsync(sourceUrl, ct);
-        var name = string.IsNullOrWhiteSpace(fileName)
-            ? Path.GetFileName(new Uri(sourceUrl).LocalPath)
-            : fileName!;
+        var name = string.IsNullOrWhiteSpace(fileName) ? FileNameFromUrl(sourceUrl, id) : fileName!;
         var dir = svc.ResolveDownloadDirectory();
         var path = Path.Combine(dir, WpUtil.SanitizeFileName(name));
         await File.WriteAllBytesAsync(path, bytes, ct);
         return JsonSerializer.Serialize(new { id, path, bytes = bytes.Length, contentType }, JsonOpts.Default);
+    }
+
+    /// <summary>Media source URLs are usually absolute, but a relative one must not throw.</summary>
+    private static string FileNameFromUrl(string sourceUrl, int id)
+    {
+        var path = Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri)
+            ? uri.LocalPath
+            : sourceUrl.Split('?')[0];
+        var name = Path.GetFileName(path);
+        return string.IsNullOrWhiteSpace(name) ? $"media-{id}" : name;
     }
 
     [McpServerTool(Name = "wp_download_media_inline"),
@@ -193,7 +201,7 @@ public static class MediaTools
             ?? throw new McpException($"Media {id} has no source_url.");
 
         var (bytes, contentType, _) = await svc.DownloadBytesAsync(sourceUrl, ct);
-        var name = WpUtil.SanitizeFileName(Path.GetFileName(new Uri(sourceUrl).LocalPath));
+        var name = WpUtil.SanitizeFileName(FileNameFromUrl(sourceUrl, id));
         if (bytes.Length > svc.Options.MaxInlineBinaryBytes)
         {
             var dir = svc.ResolveDownloadDirectory();

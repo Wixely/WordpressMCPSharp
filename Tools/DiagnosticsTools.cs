@@ -134,6 +134,7 @@ public static class DiagnosticsTools
         [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
+        registry.Options.EnsureSetupDiagnosticsEnabled();
         var (name, endpoint) = registry.Resolve(site, "wp_diagnose");
         var checks = new List<object>();
         var problems = new List<string>();
@@ -269,12 +270,14 @@ public static class DiagnosticsTools
     public static async Task<string> BisectPlugins(
         ManagementService management,
         [Description("Step: start, good, bad, status or restore.")] string step,
-        [Description("Plugins still under suspicion, as a JSON array of slugs. Pass back the `remaining` list from the previous step. Not needed for start/restore/status.")] string? remainingJson = null,
+        [Description("The plugins that were deactivated for the round you are reporting on — pass back the `remaining` list from the previous step. Not needed for start/restore/status.")] string? remainingJson = null,
         [Description("The full original plugin set, as a JSON array of slugs, returned by `start`. Pass it back on every later step so the tool can restore it.")] string? originalJson = null,
+        [Description("The set still under suspicion — pass back the `candidates` list from the previous step. Omit on the first good/bad answer.")] string? candidatesJson = null,
         [Description("Endpoint name from wp_list_endpoints. Omit to use the default site.")] string? site = null,
         CancellationToken ct = default)
     {
         var target = await management.ResolveForWriteAsync(site, "wp_bisect_plugins", ct);
+        management.RequireFeature(target, f => f.EnablePlugins, "Plugin");
         var verb = step.Trim().ToLowerInvariant();
 
         if (verb == "status")
@@ -309,13 +312,30 @@ public static class DiagnosticsTools
         if (verb == "restore")
         {
             var original = ParseList(originalJson, nameof(originalJson));
+            if (original.Count == 0)
+            {
+                // Reporting success here would leave the site with plugins still deactivated while
+                // telling the operator everything was put back.
+                throw new McpException(
+                    "wp_bisect_plugins step='restore' needs originalJson — the plugin list returned by step='start'. " +
+                    "Without it nothing can be reactivated. If you have lost it, use wp_list_plugins to see the current " +
+                    "state and reactivate manually with wp_activate_plugin.");
+            }
+
             await SetActiveAsync(management, target, original, original, ct);
+            var activeNow = await ActivePluginsAsync(management, target, ct);
+            var missing = original.Except(activeNow, StringComparer.OrdinalIgnoreCase).ToList();
+
             return JsonSerializer.Serialize(new
             {
                 endpoint = target.Name,
                 step = "restore",
                 restored = original,
-                note = "All originally active plugins have been reactivated.",
+                activeNow,
+                fullyRestored = missing.Count == 0,
+                note = missing.Count == 0
+                    ? "All originally active plugins have been reactivated."
+                    : $"These plugins could not be reactivated and need attention: {string.Join(", ", missing)}.",
             }, JsonOpts.Default);
         }
 
@@ -326,10 +346,20 @@ public static class DiagnosticsTools
         var suspects = ParseList(remainingJson, nameof(remainingJson));
         if (suspects.Count == 0)
             throw new McpException("wp_bisect_plugins: pass the `remaining` list from the previous step in remainingJson.");
+        if (originals.Count == 0)
+            throw new McpException("wp_bisect_plugins: pass the `original` list returned by step='start' in originalJson, so the tool can restore the site afterwards.");
 
-        // "good" means the problem disappeared while `remaining` was deactivated, so the culprit is in that
-        // set. "bad" means it persisted, so the culprit is among the plugins that stayed active.
-        var candidates = verb == "good" ? suspects : originals.Except(suspects, StringComparer.OrdinalIgnoreCase).ToList();
+        // `candidates` from the previous round is the set still under suspicion. Narrowing must happen
+        // within it — falling back to the full original set would re-admit plugins already cleared and
+        // eventually name an innocent one as the culprit.
+        var priorCandidates = ParseList(candidatesJson, nameof(candidatesJson));
+        if (priorCandidates.Count == 0) priorCandidates = originals;
+
+        // "good" means the problem disappeared while `remaining` was deactivated, so the culprit is among
+        // those. "bad" means it persisted, so the culprit is in the rest of the suspected set.
+        var candidates = verb == "good"
+            ? suspects
+            : priorCandidates.Except(suspects, StringComparer.OrdinalIgnoreCase).ToList();
 
         if (candidates.Count == 1)
         {
@@ -368,7 +398,8 @@ public static class DiagnosticsTools
             remaining = nextHalf,
             original = originals,
             next = "Reproduce again: step='good' if the problem is gone, step='bad' if it persists. " +
-                   "Call step='restore' at any point to put every original plugin back.",
+                   "Pass back `remaining`, `original` AND `candidates` so the search keeps narrowing. " +
+                   "Call step='restore' with `original` at any point to put every plugin back.",
         }, JsonOpts.Default);
     }
 

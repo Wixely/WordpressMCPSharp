@@ -41,8 +41,8 @@ public sealed class ManagementService
         public string Mode => Endpoint.ManagementMode;
     }
 
-    /// <summary>Resolve a site for a read-only management operation.</summary>
-    public Target Resolve(string? site, string operation)
+    /// <summary>The master gate for anything that runs WP-CLI, configured endpoint or not.</summary>
+    public void EnsureCliEnabled(string operation)
     {
         if (!_options.AllowCliManagement)
         {
@@ -50,11 +50,39 @@ public sealed class ManagementService
                 $"MCP tool '{operation}' uses the WP-CLI management channel, which is disabled. " +
                 "Set Management:AllowCliManagement=true to enable it.");
         }
+    }
 
+    /// <summary>Resolve a site for a read-only management operation.</summary>
+    public Target Resolve(string? site, string operation)
+    {
+        EnsureCliEnabled(operation);
         var (name, endpoint) = _registry.RequireManagement(site, operation);
         ValidateChannel(name, endpoint, operation);
         return new Target(name, endpoint, _registry.SafetyFor(endpoint));
     }
+
+    /// <summary>
+    /// Run a read-only command against connection details supplied for onboarding, before any endpoint
+    /// exists for the host. Still goes through the master CLI gate and the endpoint's effective safety —
+    /// a probe is the same channel, just not yet a configured one.
+    /// </summary>
+    public Task<CliResult> RunProbeAsync(
+        EndpointOptions endpoint, IReadOnlyList<string> arguments, string operation, CancellationToken ct)
+    {
+        EnsureCliEnabled(operation);
+        return RunAsync(ProbeTarget(endpoint), arguments, ct);
+    }
+
+    /// <summary>Shell form of <see cref="RunProbeAsync"/>. Callers must quote every interpolated value.</summary>
+    public Task<CliResult> RunProbeShellAsync(
+        EndpointOptions endpoint, string command, string operation, CancellationToken ct)
+    {
+        EnsureCliEnabled(operation);
+        return RunShellAsync(ProbeTarget(endpoint), command, ct, longRunning: false);
+    }
+
+    private Target ProbeTarget(EndpointOptions endpoint) =>
+        new("(probe)", endpoint, _registry.SafetyFor(endpoint));
 
     /// <summary>Resolve a site for a mutating operation: applies the write gate and the identity cross-check.</summary>
     public async Task<Target> ResolveForWriteAsync(string? site, string operation, CancellationToken ct)
@@ -73,6 +101,18 @@ public sealed class ManagementService
 
         await EnsureCorrectSiteAsync(target, operation, ct);
         return target;
+    }
+
+    /// <summary>
+    /// Apply a category feature toggle to a CLI-backed tool, so disabling a category (users, plugins,
+    /// themes, …) switches it off on both channels rather than only over REST.
+    /// </summary>
+    public void RequireFeature(Target target, Func<WordpressOptions, bool> selector, string feature)
+    {
+        if (!selector(_registry.Options))
+        {
+            throw new McpException($"{feature} tools are disabled by server configuration.");
+        }
     }
 
     public void EnsureDeleteAllowed(Target target, string operation)
@@ -159,9 +199,15 @@ public sealed class ManagementService
                 target.Endpoint.Docker!.DockerPath,
                 new[] { "exec", target.Endpoint.Docker.Container, "sh", "-c", command },
                 timeout, ct),
-            { Local: not null } => OperatingSystem.IsWindows()
-                ? ExecuteProcessAsync("cmd.exe", new[] { "/c", command }, timeout, ct)
-                : ExecuteProcessAsync("/bin/sh", new[] { "-c", command }, timeout, ct),
+            // Every caller builds POSIX commands (quoting, test -s, tar, heredocs), so handing them to
+            // cmd.exe would not fail loudly — it would return empty output that reads as "no debug log"
+            // or "snapshot missing". Refuse instead of reporting a confident wrong answer.
+            { Local: not null } when OperatingSystem.IsWindows() && !HasPosixShell() =>
+                throw new McpException(
+                    "This operation needs a POSIX shell, but the endpoint's Local channel is on Windows without one. " +
+                    "Install Git Bash or WSL and make `sh` available on the PATH, or manage this site through an " +
+                    "Ssh or Docker channel instead."),
+            { Local: not null } => ExecuteProcessAsync(PosixShell(), new[] { "-c", command }, timeout, ct),
             _ => throw new McpException($"Endpoint '{target.Name}' has no management channel configured."),
         };
     }
@@ -195,7 +241,9 @@ public sealed class ManagementService
     private static async Task<CliResult> ExecuteSshAsync(SshManagementOptions ssh, string command, TimeSpan timeout, CancellationToken ct)
     {
         using var client = CreateSshClient(ssh);
-        client.ConnectionInfo.Timeout = timeout;
+        // Connecting should not inherit a long command timeout — a dead host would otherwise block for
+        // the full long-operation budget (30 minutes by default) before reporting anything.
+        client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(Math.Min(30, Math.Max(5, timeout.TotalSeconds)));
 
         try
         {
@@ -212,6 +260,13 @@ public sealed class ManagementService
             cmd.CommandTimeout = timeout;
             await Task.Run(() => cmd.Execute(), ct);
             return new CliResult(cmd.ExitStatus ?? -1, cmd.Result ?? string.Empty, cmd.Error ?? string.Empty);
+        }
+        catch (Exception ex) when (ex is not McpException and not OperationCanceledException)
+        {
+            // SSH.NET's operation/connection exceptions would otherwise surface as an opaque
+            // "An error occurred invoking wp_…" with no indication that SSH was the problem.
+            throw new McpException(
+                $"SSH command failed on {ssh.Username}@{ssh.Host}:{ssh.Port}: {ex.Message}");
         }
         finally
         {
@@ -283,13 +338,47 @@ public sealed class ManagementService
         {
             await process.WaitForExitAsync(timeoutCts.Token);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
+            // Kill on client cancellation too, not only on timeout — otherwise an abandoned `wp core
+            // update` or `db import` keeps running unsupervised against the site.
             TryKill(process);
+            if (ct.IsCancellationRequested) throw;
             throw new McpException($"'{fileName}' did not finish within {timeout.TotalSeconds:0} seconds and was terminated.");
         }
 
         return new CliResult(process.ExitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    /// <summary>Locate a POSIX shell. On Windows, Git Bash and WSL both provide one.</summary>
+    private static string PosixShell()
+    {
+        if (!OperatingSystem.IsWindows()) return "/bin/sh";
+
+        foreach (var candidate in new[]
+                 {
+                     @"C:\Program Files\Git\usr\bin\sh.exe",
+                     @"C:\Program Files (x86)\Git\usr\bin\sh.exe",
+                 })
+        {
+            if (File.Exists(candidate)) return candidate;
+        }
+        return "sh";
+    }
+
+    private static bool HasPosixShell()
+    {
+        var shell = PosixShell();
+        if (File.Exists(shell)) return true;
+
+        // `sh` may be on the PATH without an absolute location we know about.
+        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        return path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Any(dir =>
+            {
+                try { return File.Exists(Path.Combine(dir, "sh.exe")) || File.Exists(Path.Combine(dir, "sh")); }
+                catch { return false; }
+            });
     }
 
     private static void TryKill(Process process)

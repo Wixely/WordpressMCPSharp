@@ -49,6 +49,24 @@ public static class RestPassthroughTools
             normalized += (normalized.Contains('?') ? "&" : "?") + trimmed;
         }
 
+        // The passthrough must not be a way around the gates the dedicated tools enforce. A DELETE, or
+        // any request carrying force=true, is a permanent deletion; POSTing to the plugins collection
+        // installs code. Apply the same second gates those operations require.
+        var isPermanentDelete = verb == "DELETE"
+            || normalized.Contains("force=true", StringComparison.OrdinalIgnoreCase);
+        if (isPermanentDelete)
+        {
+            svc.EnsureDeleteAllowed($"wp_rest_request ({verb} {route})");
+        }
+
+        if (verb == "POST" && IsPluginCollection(normalized))
+        {
+            svc.EnsurePluginInstallAllowed($"wp_rest_request (POST {route})");
+        }
+
+        // Route-level feature toggles, so disabling a category cannot be sidestepped through here.
+        EnforceFeatureToggle(svc, normalized);
+
         JsonNode? body = null;
         if (!string.IsNullOrWhiteSpace(bodyJson))
         {
@@ -83,6 +101,58 @@ public static class RestPassthroughTools
             truncated = false,
             body = result,
         }, JsonOpts.Default);
+    }
+
+    private static bool IsPluginCollection(string route)
+    {
+        var path = route.Split('?')[0].Trim('/');
+        return path.Equals("wp/v2/plugins", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Map a REST route onto the feature toggle that governs it, so an operator who disabled a whole
+    /// category cannot have it reached through the generic passthrough.
+    /// </summary>
+    private static void EnforceFeatureToggle(WordpressRestClient svc, string route)
+    {
+        var path = route.Split('?')[0].Trim('/');
+        var options = svc.Options;
+
+        // Longest-prefix first: wp/v2/products/categories must not match a shorter, unrelated prefix.
+        var rules = new (string Prefix, bool Enabled, string Feature)[]
+        {
+            ("wc/", options.EnableWooCommerce, "WooCommerce"),
+            ("wp-site-health/", options.EnableSiteHealth, "Site health"),
+            ("wp/v2/users", options.EnableUsers, "User"),
+            ("wp/v2/comments", options.EnableComments, "Comment"),
+            ("wp/v2/plugins", options.EnablePlugins, "Plugin"),
+            ("wp/v2/themes", options.EnableThemes, "Theme"),
+            ("wp/v2/settings", options.EnableSettings, "Settings"),
+            ("wp/v2/menus", options.EnableMenus, "Menu"),
+            ("wp/v2/menu-items", options.EnableMenus, "Menu"),
+            ("wp/v2/menu-locations", options.EnableMenus, "Menu"),
+            ("wp/v2/navigation", options.EnableMenus, "Menu"),
+            ("wp/v2/categories", options.EnableTaxonomies, "Taxonomy"),
+            ("wp/v2/tags", options.EnableTaxonomies, "Taxonomy"),
+            ("wp/v2/taxonomies", options.EnableTaxonomies, "Taxonomy"),
+            ("wp/v2/templates", options.EnableThemes, "Theme"),
+            ("wp/v2/template-parts", options.EnableThemes, "Theme"),
+            ("wp/v2/block-patterns", options.EnableThemes, "Theme"),
+            ("wp/v2/posts", options.EnableContent, "Content"),
+            ("wp/v2/pages", options.EnableContent, "Content"),
+            ("wp/v2/media", options.EnableContent, "Content"),
+            ("wp/v2/blocks", options.EnableContent, "Content"),
+            ("wp/v2/search", options.EnableContent, "Content"),
+        };
+
+        foreach (var (prefix, enabled, feature) in rules)
+        {
+            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                svc.EnsureFeature(enabled, feature);
+                return;
+            }
+        }
     }
 
     private static string NormalizeRoute(string route)

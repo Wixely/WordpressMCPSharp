@@ -4,7 +4,7 @@ A standalone C# **MCP (Model Context Protocol) server** for **[WordPress](https:
 
 ## Features
 
-- HTTP MCP server using the Streamable HTTP transport. **122 tools.**
+- HTTP MCP server using the Streamable HTTP transport. **148 tools.**
 - **Multi-site**: sites are named endpoints; every tool takes an optional `site` argument.
 - **Two independent channels per site** — the REST API and a WP-CLI management channel (SSH, local or Docker). Either works alone; tools tell you exactly what to configure when their channel is missing.
 - **Guided setup**: `wp_setup_probe` diagnoses a site from just its URL and hands back the configuration to paste; `wp_setup_probe_ssh` discovers the WordPress installs on a host.
@@ -148,13 +148,28 @@ Tools are marked **[REST]** (WordPress REST API) or **[CLI]** (WP-CLI management
 - Comments: `wp_list_comments`, `wp_get_comment`, `wp_create_comment`, `wp_update_comment`, `wp_delete_comment`.
 - Taxonomies: `wp_list_taxonomies`, `wp_list_terms`, `wp_create_term`, `wp_update_term`, `wp_delete_term`.
 - Users: `wp_list_users`, `wp_get_user`, `wp_get_me`, `wp_create_user`, `wp_update_user`, `wp_delete_user`, and the application-password tools.
+- Roles and passwords **[CLI]**: `wp_list_roles`, `wp_list_role_capabilities`, `wp_add_user_role`, `wp_remove_user_role`, `wp_reset_user_password` — what the REST API does not expose.
 - Menus: `wp_list_menus`, `wp_create_menu`, `wp_delete_menu`, `wp_list_menu_locations`, `wp_list_menu_items`, `wp_create_menu_item`, `wp_update_menu_item`, `wp_delete_menu_item`.
 - Settings: `wp_get_settings`, `wp_update_settings`.
+
+### Custom post types **[REST]**
+- `wp_list_custom_posts`, `wp_get_custom_post`, `wp_get_custom_post_content`, `wp_create_custom_post`, `wp_update_custom_post`, `wp_delete_custom_post` — full CRUD for any registered post type (portfolios, events, testimonials, products). Discover them with `wp_list_post_types`.
+
+### Custom fields **[CLI]**
+- `wp_list_post_meta`, `wp_get_post_meta`, `wp_update_post_meta`, `wp_delete_post_meta` — post meta including the fields ACF, Yoast and page builders keep hidden from the REST API.
+
+### Options — plugin configuration **[CLI]**
+- `wp_get_option`, `wp_list_options`, `wp_update_option`, `wp_delete_option` — the `wp_options` table, where almost every plugin stores its settings. The REST settings endpoint only covers a couple of dozen core values.
+- `wp_list_autoloaded_options` — what WordPress loads on every request, largest first. Bloat here is the most common cause of a site that is slow everywhere.
+- `wp_flush_transients` — clear cached transients; a standard fix for stale data or a stuck licence check.
 
 ### Client workflows **[REST]**
 - `wp_set_featured_image` — upload a file (or reuse a media id), attach it and set it as the cover, in one call.
 - `wp_clone_post` — duplicate a post or page as a draft, keeping terms, cover and template.
 - `wp_replace_in_post` — find/replace inside one item's body; previews by default.
+- `wp_restore_revision` — roll a post or page back to an earlier revision.
+- `wp_list_trash`, `wp_untrash_post` — find and restore deleted content.
+- `wp_import_media_from_url`, `wp_regenerate_thumbnails` **[CLI]** — pull imagery straight from a URL, and rebuild sizes after a theme change.
 
 ### Block themes **[REST]**
 - `wp_list_templates`, `wp_get_template`, `wp_update_template`, `wp_list_template_parts`, `wp_list_block_patterns`, `wp_list_navigation`.

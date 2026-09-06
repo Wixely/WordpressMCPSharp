@@ -44,6 +44,7 @@ public static class SiteTools
         CancellationToken ct = default)
     {
         var svc = registry.RequireRest(site, "wp_search");
+        svc.EnsureFeature(svc.Options.EnableContent, "Content");
         var qs = new List<string>
         {
             $"search={Uri.EscapeDataString(query)}",
@@ -73,6 +74,7 @@ public static class SiteTools
         CancellationToken ct = default)
     {
         var svc = registry.RequireRest(site, "wp_list_post_types");
+        svc.EnsureFeature(svc.Options.EnableContent, "Content");
         var node = await svc.GetJsonAsync("wp-json/wp/v2/types?context=edit", ct);
         var items = (node as JsonObject ?? new JsonObject()).Select(kv => kv.Value is JsonObject d ? new
         {
@@ -93,6 +95,7 @@ public static class SiteTools
         CancellationToken ct = default)
     {
         var svc = registry.RequireRest(site, "wp_list_post_statuses");
+        svc.EnsureFeature(svc.Options.EnableContent, "Content");
         var node = await svc.GetJsonAsync("wp-json/wp/v2/statuses?context=edit", ct);
         var items = (node as JsonObject ?? new JsonObject()).Select(kv => kv.Value is JsonObject d ? new
         {

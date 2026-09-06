@@ -155,7 +155,7 @@ public sealed class WordpressRestClient : IDisposable
         using var response = await _http.SendAsync(request, ct);
         await EnsureSuccessAsync(response, ct);
 
-        if (response.StatusCode == HttpStatusCode.NoContent || response.Content.Headers.ContentLength == 0)
+        if (response.StatusCode == HttpStatusCode.NoContent)
             return null;
 
         return await ParseJsonAsync(response, ct);
@@ -187,15 +187,32 @@ public sealed class WordpressRestClient : IDisposable
 
     public async Task<(byte[] Bytes, string? ContentType, string? FileName)> DownloadBytesAsync(string urlOrPath, CancellationToken ct)
     {
-        // Media source URLs come back absolute; strip to relative so BaseAddress + auth apply.
-        var relative = TrimToRelative(urlOrPath);
-        using var response = await _http.GetAsync(relative, HttpCompletionOption.ResponseHeadersRead, ct);
-        await EnsureSuccessAsync(response, ct);
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        var contentType = response.Content.Headers.ContentType?.MediaType;
-        var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
-            ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"');
-        return (bytes, contentType, fileName);
+        // Media source URLs come back absolute. Same-origin ones are fetched relative to BaseAddress so
+        // the site's credentials apply; anything off-origin (a CDN or object store, which is common) is
+        // fetched WITHOUT them — sending the application password to a third-party host would leak it.
+        var isOffOrigin = Uri.TryCreate(urlOrPath, UriKind.Absolute, out var absolute) && !_baseUri.IsBaseOf(absolute);
+
+        HttpResponseMessage response;
+        if (isOffOrigin)
+        {
+            using var anonymous = new HttpClient { Timeout = _http.Timeout };
+            anonymous.DefaultRequestHeaders.UserAgent.ParseAdd(_options.UserAgent);
+            response = await anonymous.GetAsync(absolute, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        else
+        {
+            response = await _http.GetAsync(TrimToRelative(urlOrPath), HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+
+        using (response)
+        {
+            await EnsureSuccessAsync(response, ct);
+            var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+            var contentType = response.Content.Headers.ContentType?.MediaType;
+            var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+                ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"');
+            return (bytes, contentType, fileName);
+        }
     }
 
     /// <summary>Upload a media file via POST wp/v2/media with a Content-Disposition filename.</summary>
@@ -263,7 +280,6 @@ public sealed class WordpressRestClient : IDisposable
     public async Task<string?> TryGetCoreVersionAsync(CancellationToken ct)
     {
         if (_coreVersionProbed) return _coreVersion;
-        _coreVersionProbed = true;
 
         try
         {
@@ -274,7 +290,12 @@ public sealed class WordpressRestClient : IDisposable
                 html,
                 @"<meta[^>]+name=[""']generator[""'][^>]+content=[""']WordPress\s+([0-9][^""']*)[""']",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            return _coreVersion = match.Success ? match.Groups[1].Value.Trim() : null;
+
+            // Only mark the probe done once it has actually completed, or a concurrent caller would
+            // read a null result and report that the site hides its version when it does not.
+            _coreVersion = match.Success ? match.Groups[1].Value.Trim() : null;
+            _coreVersionProbed = true;
+            return _coreVersion;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -289,12 +310,34 @@ public sealed class WordpressRestClient : IDisposable
     private async Task<string> ResolveUrlAsync(string relativePath, CancellationToken ct)
     {
         var (route, query) = SplitRoute(relativePath);
+        query = AppendWooCommerceCredentials(route, query);
+
         _restPrefixPretty ??= await DetectPrettyPermalinksAsync(ct);
         if (_restPrefixPretty.Value)
         {
             return "wp-json/" + route + (query is null ? string.Empty : "?" + query);
         }
         return "index.php?rest_route=/" + route + (query is null ? string.Empty : "&" + query);
+    }
+
+    /// <summary>
+    /// Stores that reject application passwords for the Store API accept a consumer key/secret pair
+    /// instead. When the endpoint supplies one, attach it to wc/ routes only.
+    /// </summary>
+    private string? AppendWooCommerceCredentials(string route, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(_rest.WooCommerceConsumerKey)
+            || string.IsNullOrWhiteSpace(_rest.WooCommerceConsumerSecret)
+            || !route.StartsWith("wc/", StringComparison.OrdinalIgnoreCase))
+        {
+            return query;
+        }
+
+        var credentials =
+            $"consumer_key={Uri.EscapeDataString(_rest.WooCommerceConsumerKey!)}" +
+            $"&consumer_secret={Uri.EscapeDataString(_rest.WooCommerceConsumerSecret!)}";
+
+        return string.IsNullOrWhiteSpace(query) ? credentials : query + "&" + credentials;
     }
 
     private static (string Route, string? Query) SplitRoute(string relativePath)
@@ -362,8 +405,23 @@ public sealed class WordpressRestClient : IDisposable
                 $"Check that the endpoint's RestApi:BaseUrl points at the WordPress site root. " +
                 $"Run wp_setup_probe with url='{_baseUri}' for a full diagnosis.");
         }
-        var stream = await response.Content.ReadAsStreamAsync(ct);
-        return await JsonNode.ParseAsync(stream, cancellationToken: ct);
+
+        // A chunked response reports no ContentLength, so an empty success body reaches us here; and a
+        // malformed one would otherwise surface as a bare JsonException with no indication of the route.
+        var text = await response.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(text)) return null;
+
+        try
+        {
+            return JsonNode.Parse(text);
+        }
+        catch (JsonException ex)
+        {
+            var preview = text.Length > 300 ? text[..300] + "…" : text;
+            throw new McpException(
+                $"WordPress returned a body that is not valid JSON for {response.RequestMessage?.RequestUri} " +
+                $"on endpoint '{EndpointName}': {ex.Message} Body starts: {preview}");
+        }
     }
 
     public void Dispose()
