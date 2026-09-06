@@ -41,7 +41,7 @@ ENV DOTNET_ENVIRONMENT=Production \
     ASPNETCORE_ENVIRONMENT=Production \
     DOTNET_RUNNING_IN_CONTAINER=true \
     WORDPRESSMCP_Server__Host=0.0.0.0 \
-    WORDPRESSMCP_Server__Port=5720 \
+    WORDPRESSMCP_Server__Port=5721 \
     WORDPRESSMCP_Server__Path=/mcp \
     WORDPRESSMCP_Server__Password= \
     WORDPRESSMCP_Wordpress__ReadOnly=true \
@@ -63,7 +63,7 @@ RUN mkdir -p /app/logs && chown -R $APP_UID:0 /app
 COPY --from=build --chown=$APP_UID:0 /app/publish ./
 
 USER $APP_UID
-EXPOSE 5720
+EXPOSE 5721
 VOLUME ["/app/logs"]
 
 ENTRYPOINT ["./WordpressMCPSharp"]

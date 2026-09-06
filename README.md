@@ -15,7 +15,7 @@ A standalone C# **MCP (Model Context Protocol) server** for **[WordPress](https:
 
 The server starts with nothing configured, so its setup tools can tell you what to configure.
 
-1. Start the server (`dotnet run`) and point your MCP client at `http://localhost:5720/mcp`.
+1. Start the server (`dotnet run`) and point your MCP client at `http://localhost:5721/mcp`.
 2. Run **`wp_setup_probe`** with your site URL (credentials optional but recommended):
 
    ```
@@ -125,7 +125,7 @@ Environment variables win over JSON; use the `WORDPRESSMCP_` prefix and `__` for
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `Host` / `Port` / `Path` | `localhost` / `5720` / `/mcp` | HTTP listener. |
+| `Host` / `Port` / `Path` | `localhost` / `5721` / `/mcp` | HTTP listener. |
 | `WindowsServiceName` | `WordpressMCPSharp` | Service name under SCM. |
 | `Password` | blank | Optional MCP endpoint password (`Authorization: Bearer`, Basic auth password, or `X-MCP-Password`). |
 
@@ -212,13 +212,13 @@ Tools are marked **[REST]** (WordPress REST API) or **[CLI]** (WP-CLI management
 dotnet run
 ```
 
-Then point your MCP client at `http://localhost:5720/mcp`.
+Then point your MCP client at `http://localhost:5721/mcp`.
 
 ## Docker
 
 ```sh
 docker pull ghcr.io/wixely/wordpressmcpsharp:<version>
-docker run --rm -p 5720:5720 \
+docker run --rm -p 5721:5721 \
   -e WORDPRESSMCP_Endpoints__clienta__RestApi__BaseUrl=https://clienta.com/ \
   -e WORDPRESSMCP_Endpoints__clienta__RestApi__Username=admin \
   -e "WORDPRESSMCP_Endpoints__clienta__RestApi__ApplicationPassword=xxxx xxxx xxxx xxxx" \

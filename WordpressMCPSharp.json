@@ -74,7 +74,7 @@
   },
   "Server": {
     "Host": "localhost",
-    "Port": 5720,
+    "Port": 5721,
     "Path": "/mcp",
     "WindowsServiceName": "WordpressMCPSharp",
     "Password": ""
